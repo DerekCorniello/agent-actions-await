@@ -98,9 +98,9 @@ export async function getPrHeadSha(opts: {
   owner: string;
   repo: string;
   prNumber: number;
-  auth?: GhAuth;
-  fetchFn?: FetchFn;
-  env?: NodeJS.ProcessEnv;
+  auth?: GhAuth | undefined;
+  fetchFn?: FetchFn | undefined;
+  env?: NodeJS.ProcessEnv | undefined;
 }): Promise<string> {
   const apiBase = opts.auth?.apiBase ?? resolveApiBase(opts.env);
   const token = opts.auth?.token ?? resolveToken(opts.env);
@@ -129,9 +129,9 @@ export async function getChecksForSha(opts: {
   owner: string;
   repo: string;
   sha: string;
-  auth?: GhAuth;
-  fetchFn?: FetchFn;
-  env?: NodeJS.ProcessEnv;
+  auth?: GhAuth | undefined;
+  fetchFn?: FetchFn | undefined;
+  env?: NodeJS.ProcessEnv | undefined;
 }): Promise<CheckInfo[]> {
   const apiBase = opts.auth?.apiBase ?? resolveApiBase(opts.env);
   const token = opts.auth?.token ?? resolveToken(opts.env);
@@ -184,11 +184,11 @@ export async function getChecksForShaWithGrace(opts: {
   owner: string;
   repo: string;
   sha: string;
-  auth?: GhAuth;
-  fetchFn?: FetchFn;
-  env?: NodeJS.ProcessEnv;
-  graceMs?: number;
-  pollIntervalMs?: number;
+  auth?: GhAuth | undefined;
+  fetchFn?: FetchFn | undefined;
+  env?: NodeJS.ProcessEnv | undefined;
+  graceMs?: number | undefined;
+  pollIntervalMs?: number | undefined;
 }): Promise<CheckInfo[]> {
   const graceMs = opts.graceMs ?? 60_000;
   const pollIntervalMs = opts.pollIntervalMs ?? 2000;
