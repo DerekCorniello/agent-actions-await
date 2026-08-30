@@ -405,4 +405,38 @@ export class WatchManager {
   handleCount(): number {
     return this.watches.size;
   }
+
+  /** List pending handles (for poller) */
+  pendingHandles(): string[] {
+    const out: string[] = [];
+    for (const [h, e] of this.watches) if (e.status.state === "pending") out.push(h);
+    return out;
+  }
+
+  /** Apply fresh checks from polling fallback into watch state. Returns true if transitioned to completed. */
+  applyPolledChecks(handle: string, fresh: CheckInfo[]): boolean {
+    const e = this.watches.get(handle);
+    if (!e || e.status.state !== "pending") return false;
+    const filtered = filterChecks(fresh, e.status.filter);
+    // If no checks after grace, treat as completed with empty? Per Q21, 0 after grace is no checks => completed?
+    // Keep pending if 0 — poller will retry.
+    if (filtered.length === 0) return false;
+    e.status.checks = filtered;
+    const summ = summarize(filtered);
+    e.status.pending = summ.pending;
+    e.status.completed = summ.completed;
+    e.status.updatedAt = Date.now();
+    if (allSettled(filtered)) {
+      e.status.state = "completed";
+      e.unsub();
+      if (e.timer) clearTimeout(e.timer);
+      return true;
+    }
+    return false;
+  }
+
+  /** Expose all handles for tests/maintenance */
+  allHandles(): string[] {
+    return [...this.watches.keys()];
+  }
 }
