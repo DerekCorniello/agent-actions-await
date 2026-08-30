@@ -1,0 +1,36 @@
+{
+  "name": "agent-actions-await",
+  "version": "0.1.0",
+  "description": "Wait on GitHub PR checks without polling — MCP server with webhook + tunnel",
+  "type": "module",
+  "license": "GPL-3.0-only",
+  "engines": {
+    "node": ">=20"
+  },
+  "bin": {
+    "agent-actions-await": "./dist/bin/cli.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src --ext .ts",
+    "prepare": "node scripts/postinstall.js"
+  },
+  "keywords": [
+    "github",
+    "actions",
+    "mcp",
+    "pr",
+    "cloudflared"
+  ],
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.6.0",
+    "vitest": "^3.0.0"
+  }
+}
