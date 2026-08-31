@@ -8,27 +8,28 @@ I got tired of agents doing `sleep 10 && gh pr checks` over and over. This runs 
 
 You run one process locally. It opens a quick Cloudflare tunnel, registers a GitHub webhook to that tunnel URL, and holds an in-memory bus keyed by `owner/repo@sha`. When GitHub posts `check_run` or `workflow_run` events, the server normalizes them and resolves the waiting tool call. If webhooks get dropped, it polls the GitHub API on a backoff instead. No hosted service. No extra accounts. You run it, you own it.
 
-## Setup — one command if you are in a git repo
+## Setup — one harness command
 
 ```sh
-npx agent-actions-await setup
-# or: npx agent-actions-await init
-# or: npx agent-actions-await init owner/repo
+claude mcp add agent-actions-await -- npx -y agent-actions-await start --stdio
 ```
 
-`setup` is the same as `init` then prints the line to copy for your harness. With no arg it reads `git remote get-url origin` so you do not have to type `owner/repo`. If you skip `init` entirely, `start` will auto-detect the repo and init for you.
+That is it. Restart the harness and you are done. The first `start` auto-detects `owner/repo` from `git remote get-url origin` `src/git.ts:14`, creates `~/.config/agent-actions-await/secrets/owner__repo.txt` `600` and `~/.config/agent-actions-await/config.json` `src/config.ts:29`, and tries `gh api repos/owner/repo/hooks` if `gh` is logged in. Poll fallback `src/poller.ts:1` 30s grace then 15s works even without a hook, so you can use it right away and add the webhook later.
 
-`init` does three things:
+If you prefer to set it up before adding to the harness:
 
-- creates a per-repo webhook secret in `~/.config/agent-actions-await/secrets/owner__repo.txt` with 600 perms
-- tries `gh api repos/owner/repo/hooks` if `gh` is logged in, else prints the URL and secret so you can add the hook by hand. Poll fallback works even without a hook, so you can use it right away and add the webhook later.
-- writes `~/.config/agent-actions-await/config.json` with the repo and port. Run `npx agent-actions-await doctor` to see what is configured, whether `gh` is authed, and whether `cloudflared` is cached.
+```sh
+npx agent-actions-await init          # no arg, reads git remote
+npx agent-actions-await init owner/repo
+npx agent-actions-await setup         # same as init then prints the claude line
+npx agent-actions-await doctor        # shows config, gh status, cloudflared cache
+```
 
-`start`:
+`start` alone is enough — `bin/cli.ts:129` checks `~/.config` on boot and auto-inits from git remote if empty, then:
 
-- picks a free port on `127.0.0.1`, starts the webhook receiver at `POST /webhook` and `GET /health`
-- starts or reuses a `cloudflared` quick tunnel and exposes the webhook, starts a fallback poller (30s grace, then every 15s)
-- connects an MCP server over stdio with three tools. If no config exists it auto-inits from git remote first.
+- picks a free port on `127.0.0.1`, starts the webhook receiver at `POST /webhook` and `GET /health` `src/http-server.ts:22`
+- starts or reuses a `cloudflared` quick tunnel and exposes the webhook, starts a fallback poller (30s grace, then every 15s) `src/tunnel-manager.ts:16` with 2s restart and re-PATCH `Q16`
+- connects an MCP server over stdio with three tools
 
 Polling and GH host are configurable globally and per call. It works with `github.com` and GitHub Enterprise via `GITHUB_API_URL` or `GH_HOST`.
 
