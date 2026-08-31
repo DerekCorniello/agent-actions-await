@@ -18,7 +18,10 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
-    "lint": "eslint src --ext .ts",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write \"src/**/*.{ts,js}\" \"bin/**/*.{ts,js}\" \"tests/**/*.{ts,js}\"",
+    "format:check": "prettier --check \"src/**/*.{ts,js}\" \"bin/**/*.{ts,js}\" \"tests/**/*.{ts,js}\"",
     "prepare": "node scripts/postinstall.js"
   },
   "keywords": [
@@ -31,7 +34,11 @@
   "devDependencies": {
     "@types/node": "^22.0.0",
     "@vitest/coverage-v8": "^3.2.7",
+    "eslint": "^9.39.5",
+    "eslint-config-prettier": "^9.1.2",
+    "prettier": "^3.9.6",
     "typescript": "^5.6.0",
+    "typescript-eslint": "^8.68.0",
     "vitest": "^3.0.0"
   },
   "dependencies": {
