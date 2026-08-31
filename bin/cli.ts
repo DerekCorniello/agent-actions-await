@@ -8,6 +8,7 @@ import { createMcpServer } from "../src/mcp-server.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { loadConfig, saveConfig, ensureSecret, readSecret, makeSecretGetter, configPath } from "../src/config.js";
 import { ensureCloudflared, startTunnel } from "../src/tunnel.js";
+import { TunnelManager, repatchWebhookWithRetry } from "../src/tunnel-manager.js";
 import { parseOwnerRepo, usageText, buildHookPayload, parsePortArg, shouldUseStdio } from "../src/cli-helpers.js";
 
 function usage(): never {
@@ -113,28 +114,33 @@ async function cmdStart(opts: { stdio: boolean; port?: number }): Promise<void> 
   });
   poller.start();
 
-  // Tunnel (lazy download if needed)
-  let tunnelUrl: string | null = null;
+  // Tunnel with restart watcher and webhook re-PATCH (Q16)
   try {
     const bin = await ensureCloudflared();
-    const t = await startTunnel(actualPort, bin);
-    tunnelUrl = t.url;
-    console.log(`tunnel ${tunnelUrl} -> ${url}`);
-    // Re-PATCH hooks to new URL on restart — handled via tunnel restart watcher in full impl
-    // For this version, log hook URLs that need PATCHing
-    for (const r of cfg.repos) {
-      if (r.hookId) {
-        try {
-          // try patch via gh if available
-          try {
-            execSync("gh auth status", { stdio: "ignore" });
-            execSync(`gh api --method PATCH repos/${r.owner}/${r.repo}/hooks/${r.hookId} -f config[url]=${tunnelUrl}/webhook`, { stdio: "ignore" });
-            console.log(`patched hook ${r.hookId} for ${r.owner}/${r.repo} -> ${tunnelUrl}/webhook`);
-          } catch {}
-        } catch {}
-      }
-    }
-    process.on("exit", () => t.stop());
+    const hooks = cfg.repos.filter((r) => r.hookId !== undefined).map((r) => ({ owner: r.owner, repo: r.repo, hookId: r.hookId! }));
+    const mgr = new TunnelManager({
+      port: actualPort,
+      binPath: bin,
+      hooks,
+      onUrl: (newUrl) => console.log(`tunnel ${newUrl} -> ${url}`),
+      onError: (err) => console.warn("tunnel:", err.message),
+      repatch: async (owner, repo, hookId, newUrl) => {
+        await repatchWebhookWithRetry(owner, repo, hookId, `${newUrl}/webhook`, {
+          patch: async (o, r, id, u) => {
+            execSync(`gh api --method PATCH repos/${o}/${r}/hooks/${id} -f config[url]=${u}`, { stdio: "ignore" });
+          },
+          create: async (o, r, u) => {
+            const payload = buildHookPayload(u, (await readSecret(o, r)) ?? "");
+            const out = execSync(`gh api repos/${o}/${r}/hooks --input -`, { input: payload, encoding: "utf8" }) as string;
+            const j = JSON.parse(out) as { id: number };
+            return j.id;
+          },
+          onError: (e) => console.warn(e.message),
+        });
+      },
+    });
+    await mgr.start();
+    process.on("exit", () => mgr.stop());
   } catch (e) {
     console.warn("tunnel failed to start (webhook will rely on poll fallback):", (e as Error).message);
   }
