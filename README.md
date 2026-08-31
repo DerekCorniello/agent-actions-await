@@ -11,12 +11,12 @@ You run one process locally. It opens a quick Cloudflare tunnel, registers a Git
 ## Setup — one harness command
 
 ```sh
-claude mcp add agent-actions-await -- npx -y agent-actions-await start --stdio
+claude mcp add agent-actions-await -- npx -y agent-actions-await
 ```
 
-That is it. Restart the harness and you are done. `start` on first boot auto-detects `owner/repo` from `git remote get-url origin` `src/git.ts:14`, creates `~/.config/agent-actions-await/secrets/owner__repo.txt` `600` and `config.json` `src/config.ts:29`, and tries `gh api` if logged in. Poll fallback `src/poller.ts:1` works without a hook, so it is usable right away.
+That is it. Restart the harness and you are done. On first boot it auto-detects `owner/repo` from `git remote get-url origin` `src/git.ts:14`, creates `~/.config/agent-actions-await/secrets/owner__repo.txt` `600` and `config.json` `src/config.ts:29`, and tries `gh api` if logged in. Poll fallback `src/poller.ts:1` works without a hook, so it is usable right away.
 
-`bin/cli.ts:129` on every start:
+`bin/cli.ts:51` on every run:
 
 - picks a free port on `127.0.0.1`, starts `POST /webhook` and `GET /health` `src/http-server.ts:22`
 - opens a `cloudflared` quick tunnel `src/tunnel-manager.ts:16` with 2s restart and re-PATCH `Q16`
@@ -45,7 +45,7 @@ If your harness uses a file, add this to `mcp.json`:
     "mcpServers": {
         "agent-actions-await": {
             "command": "npx",
-            "args": ["-y", "agent-actions-await", "start", "--stdio"]
+            "args": ["-y", "agent-actions-await"]
         }
     }
 }

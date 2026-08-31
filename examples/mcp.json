@@ -1,9 +1,9 @@
 {
-  "mcpServers": {
-    "agent-actions-await": {
-      "command": "npx",
-      "args": ["agent-actions-await", "start", "--stdio"],
-      "env": {}
+    "mcpServers": {
+        "agent-actions-await": {
+            "command": "npx",
+            "args": ["-y", "agent-actions-await"],
+            "env": {}
+        }
     }
-  }
 }
