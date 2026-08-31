@@ -1,26 +1,10 @@
 import { describe, it, expect } from "vitest";
-import {
-    parseOwnerRepo,
-    usageText,
-    buildHookPayload,
-    parsePortArg,
-    shouldUseStdio,
-} from "../src/cli-helpers.js";
+import { usageText, buildHookPayload } from "../src/cli-helpers.js";
 
 describe("cli-helpers", () => {
-    it("parseOwnerRepo splits owner/repo", () => {
-        expect(parseOwnerRepo("acme/demo")).toEqual({ owner: "acme", repo: "demo" });
-    });
-
-    it("parseOwnerRepo throws on bad input", () => {
-        expect(() => parseOwnerRepo("bad")).toThrow(/expected/);
-        expect(() => parseOwnerRepo("a/")).toThrow();
-        expect(() => parseOwnerRepo("/b")).toThrow();
-    });
-
     it("usageText contains harness add", () => {
         const t = usageText();
-        expect(t).toMatch(/npx agent-actions-await/);
+        expect(t).toMatch(/agent-actions-await/);
         expect(t).toMatch(/claude mcp add/);
         expect(t).toMatch(/--help/);
     });
@@ -39,19 +23,5 @@ describe("cli-helpers", () => {
             "pull_request",
             "status",
         ]);
-    });
-
-    it("parsePortArg returns number or undefined", () => {
-        expect(parsePortArg([])).toBeUndefined();
-        expect(parsePortArg(["--port", "3000"])).toBe(3000);
-        expect(parsePortArg(["--port", "0"])).toBe(0);
-        expect(() => parsePortArg(["--port", "bad"])).toThrow(/requires a number/);
-        expect(parsePortArg(["--port"])).toBeUndefined();
-    });
-
-    it("shouldUseStdio respects --http-only", () => {
-        expect(shouldUseStdio([])).toBe(true);
-        expect(shouldUseStdio(["--http-only"])).toBe(false);
-        expect(shouldUseStdio(["--port", "3000"])).toBe(true);
     });
 });
