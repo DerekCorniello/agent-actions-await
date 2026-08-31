@@ -137,20 +137,17 @@ async function cmdStart(opts: { stdio: boolean; port?: number }): Promise<void> 
 
 async function main(): Promise<void> {
     const args = process.argv.slice(2);
-    if (args.length === 0) {
-        await cmdStart({ stdio: true });
-        return;
-    }
     if (args.includes("--help") || args.includes("-h")) usage();
-    const cmd = args[0];
-    if (cmd === "start") {
-        const stdio = shouldUseStdio(args);
-        const p = parsePortArg(args);
-        await cmdStart({ stdio, ...(p !== undefined ? { port: p } : {}) });
-        return;
+    // allow deprecated `start` as alias: `npx agent-actions-await start` still works
+    const filtered = args.filter((a) => a !== "start");
+    const unknown = filtered.find((a) => !a.startsWith("-"));
+    if (unknown) {
+        console.error(`unknown argument: ${unknown}`);
+        usage();
     }
-    console.error(`unknown command: ${cmd}`);
-    usage();
+    const stdio = shouldUseStdio(filtered);
+    const p = parsePortArg(filtered);
+    await cmdStart({ stdio, ...(p !== undefined ? { port: p } : {}) });
 }
 
 main().catch((e: unknown) => {

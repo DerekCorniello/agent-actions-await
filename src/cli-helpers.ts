@@ -8,15 +8,16 @@ export function usageText(): string {
     return `agent-actions-await — wait on GitHub PR checks without polling in bash
 
 Usage:
-  npx agent-actions-await start [--stdio] [--port N]
+  npx agent-actions-await [--stdio] [--port N]
   npx agent-actions-await --help
 
-The server auto-creates config from git remote on first start. Just add it to your harness:
+The server auto-creates config from git remote on first run. Just add it to your harness:
 
-  claude mcp add agent-actions-await -- npx -y agent-actions-await start --stdio
+  claude mcp add agent-actions-await -- npx -y agent-actions-await
 
 Options:
-  --help  Show this help
+  --stdio   Use stdio transport (default)
+  --help    Show this help
 `;
 }
 

@@ -18,11 +18,11 @@ describe("cli-helpers", () => {
         expect(() => parseOwnerRepo("/b")).toThrow();
     });
 
-    it("usageText contains start", () => {
+    it("usageText contains harness add", () => {
         const t = usageText();
-        expect(t).toMatch(/start/);
-        expect(t).toMatch(/--port/);
+        expect(t).toMatch(/npx agent-actions-await/);
         expect(t).toMatch(/claude mcp add/);
+        expect(t).toMatch(/--help/);
     });
 
     it("buildHookPayload is valid JSON with 5 events and secret", () => {

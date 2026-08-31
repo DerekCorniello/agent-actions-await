@@ -5,7 +5,7 @@ import { existsSync } from "node:fs";
 describe("cli", () => {
     it("bin/cli.ts builds to executable and --help prints usage", () => {
         const out = execFileSync("node", ["dist/bin/cli.js", "--help"], { encoding: "utf8" });
-        expect(out).toMatch(/start/);
+        expect(out).toMatch(/npx agent-actions-await/);
         expect(out).toMatch(/claude mcp add/);
     });
 
@@ -13,12 +13,11 @@ describe("cli", () => {
         expect(existsSync("dist/bin/cli.js")).toBe(true);
     });
 
-    it("unknown command prints usage", () => {
+    it("unknown argument prints usage", () => {
         const out = execFileSync("node", ["dist/bin/cli.js", "bogus"], {
             encoding: "utf8",
             stdio: "pipe",
         });
-        // usage prints to stdout and exits 0, but also logs unknown command
-        expect(out.toLowerCase()).toMatch(/start/);
+        expect(out.toLowerCase()).toMatch(/npx agent-actions-await/);
     });
 });
