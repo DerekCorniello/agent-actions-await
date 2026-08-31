@@ -8,16 +8,12 @@ export function usageText(): string {
     return `agent-actions-await — wait on GitHub PR checks without polling in bash
 
 Usage:
-  npx agent-actions-await init [owner/repo] [--port N]
   npx agent-actions-await start [--stdio] [--port N]
-  npx agent-actions-await setup [owner/repo]   one-command init + mcp hint
-  npx agent-actions-await doctor              check gh, tunnel, config
+  npx agent-actions-await --help
 
-Commands:
-  init    Register webhook for repo, generate per-repo secret. No arg tries git remote.
-  start   Start tunnel + webhook receiver + MCP server. Auto-inits if config empty.
-  setup   Same as init, then prints the harness mcp add line to copy
-  doctor  Prints config, gh status, and tunnel cache
+The server auto-creates config from git remote on first start. Just add it to your harness:
+
+  claude mcp add agent-actions-await -- npx -y agent-actions-await start --stdio
 
 Options:
   --help  Show this help

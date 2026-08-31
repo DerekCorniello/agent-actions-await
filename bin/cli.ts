@@ -12,17 +12,10 @@ import {
     ensureSecret,
     readSecret,
     makeSecretGetter,
-    configPath,
 } from "../src/config.js";
-import { ensureCloudflared, startTunnel } from "../src/tunnel.js";
+import { ensureCloudflared } from "../src/tunnel.js";
 import { TunnelManager, repatchWebhookWithRetry } from "../src/tunnel-manager.js";
-import {
-    parseOwnerRepo,
-    usageText,
-    buildHookPayload,
-    parsePortArg,
-    shouldUseStdio,
-} from "../src/cli-helpers.js";
+import { buildHookPayload, parsePortArg, shouldUseStdio, usageText } from "../src/cli-helpers.js";
 import { getGitRemoteOwnerRepo } from "../src/git.js";
 
 function usage(): never {
@@ -30,140 +23,29 @@ function usage(): never {
     process.exit(0);
 }
 
-async function cmdInit(ownerRepo: string | undefined, portArg?: string): Promise<void> {
-    const resolved =
-        ownerRepo ??
-        (() => {
-            const g = getGitRemoteOwnerRepo();
-            if (!g)
-                throw new Error(
-                    "no owner/repo given and git remote origin not found — run: npx agent-actions-await init owner/repo",
-                );
-            return `${g.owner}/${g.repo}`;
-        })();
-    const { owner, repo } = parseOwnerRepo(resolved);
+async function ensureRepoConfig(owner: string, repo: string, port: number): Promise<void> {
     const cfg = await loadConfig();
-    const port = portArg ? Number(portArg) : (cfg.port ?? 0);
+    if (cfg.repos?.some((r) => r.owner === owner && r.repo === repo)) return;
     if (!cfg.repos) cfg.repos = [];
-    // ensure secret per Q34
     const secretPath = await ensureSecret(owner, repo);
     const secret = await readSecret(owner, repo);
     if (!secret) throw new Error("failed to create secret");
-    // check gh CLI auth
-    let hasGh = false;
+    // try webhook if gh authed, otherwise leave hookId pending and rely on poll
     try {
         execSync("gh auth status", { stdio: "ignore" });
-        hasGh = true;
-    } catch {}
-    // Try to register webhook if gh available; otherwise print manual instructions (Q22 degraded mode)
-    if (hasGh) {
-        try {
-            // Start temporary tunnel to get URL for registration? For init we need tunnel URL.
-            // We start a short-lived tunnel just to obtain public URL, then register hook.
-            // If cloudflared not yet cached, postinstall or lazy will ensure.
-            let bin: string;
-            try {
-                bin = await ensureCloudflared();
-            } catch (e: unknown) {
-                console.warn("cloudflared not available:", (e as Error).message);
-                bin = "cloudflared";
-            }
-            // We need a temporary http server to satisfy tunnel --url; use ephemeral port
-            const bus = new EventBus();
-            const { server, port: tempPort } = await createHttpServer({
-                bus,
-                getSecret: makeSecretGetter(),
-                port,
-            });
-            let url = `http://localhost:${tempPort}`;
-            let tunnelUrl: string | null = null;
-            try {
-                const t = await startTunnel(tempPort, bin);
-                tunnelUrl = t.url;
-                url = tunnelUrl;
-                t.stop();
-            } catch {
-                // fallback to manual
-            }
-            server.close();
-            const hookUrl = `${url}/webhook`;
-            // Try gh api to create hook
-            const payload = buildHookPayload(hookUrl, secret);
-            try {
-                const out = execSync(`gh api repos/${owner}/${repo}/hooks --input -`, {
-                    input: payload,
-                    encoding: "utf8",
-                });
-                const j = JSON.parse(out) as { id: number };
-                cfg.repos = cfg.repos.filter((r) => !(r.owner === owner && r.repo === repo));
-                cfg.repos.push({ owner, repo, hookId: j.id, secretPath });
-                cfg.port = port;
-                await saveConfig(cfg);
-                console.log(`webhook registered hook ${j.id} -> ${hookUrl}`);
-                console.log(`config written to ${configPath()}`);
-                return;
-            } catch (e: unknown) {
-                console.warn(
-                    "gh api hook create failed, saving config for manual setup:",
-                    (e as Error).message,
-                );
-                console.log(
-                    `Manual: create webhook at https://github.com/${owner}/${repo}/settings/hooks/new`,
-                );
-                console.log(`Payload URL: ${hookUrl}`);
-                console.log(`Secret: ${secret.slice(0, 8)}... (${secretPath})`);
-                console.log(`Events: check_suite, check_run, workflow_run, pull_request, status`);
-            }
-        } catch (e: unknown) {
-            console.warn("init tunnel/webhook error:", (e as Error).message);
-        }
-    } else {
-        console.log(
-            "gh CLI not authenticated — manual webhook setup required (Q22 degraded mode, polling fallback active)",
-        );
-        console.log(`1) Go to https://github.com/${owner}/${repo}/settings/hooks/new`);
-        console.log(
-            `2) Payload URL: <your tunnel URL>/webhook (run 'npx agent-actions-await start' to see URL)`,
-        );
-        console.log(`3) Secret: stored at ${secretPath}`);
-        console.log(`4) Events: check_suite, check_run, workflow_run, pull_request, status`);
-        console.log(`5) Polling fallback will work until webhook is configured`);
+        const hookUrl = `https://placeholder.trycloudflare.com/webhook`;
+        const payload = buildHookPayload(hookUrl, secret);
+        const out = execSync(`gh api repos/${owner}/${repo}/hooks --input -`, {
+            input: payload,
+            encoding: "utf8",
+        }) as string;
+        const j = JSON.parse(out) as { id: number };
+        cfg.repos.push({ owner, repo, hookId: j.id, secretPath });
+    } catch {
+        cfg.repos.push({ owner, repo, secretPath });
     }
-    // Save config even without hook
-    cfg.repos = cfg.repos.filter((r) => !(r.owner === owner && r.repo === repo));
-    cfg.repos.push({ owner, repo, secretPath });
     cfg.port = port;
     await saveConfig(cfg);
-    console.log(`config written to ${configPath()} (hookId pending)`);
-}
-
-async function cmdDoctor(): Promise<void> {
-    const cfg = await loadConfig();
-    console.log(`config: ${configPath()}`);
-    console.log(JSON.stringify(cfg, null, 2));
-    try {
-        const out = execSync("gh auth status 2>&1", { encoding: "utf8" });
-        console.log(out.trim().split("\n")[0]);
-    } catch {
-        console.log("gh: not authenticated — poll fallback will be used");
-    }
-    try {
-        const bin = await ensureCloudflared();
-        console.log(`cloudflared: ${bin}`);
-    } catch (e: unknown) {
-        console.log(`cloudflared: not found — ${(e as Error).message}`);
-    }
-    for (const r of cfg.repos) {
-        const s = await readSecret(r.owner, r.repo);
-        console.log(
-            `${r.owner}/${r.repo} hookId=${r.hookId ?? "pending"} secret=${s ? `${s.slice(0, 8)}...` : "missing"}`,
-        );
-    }
-    if (cfg.repos.length === 0)
-        console.log("no repos configured — run: npx agent-actions-await init");
-    console.log("\nharness quick add:");
-    console.log("  claude mcp add agent-actions-await -- npx -y agent-actions-await start --stdio");
-    console.log("  opencode: copy examples/mcp.json to ~/.config/opencode/mcp.json");
 }
 
 async function cmdStart(opts: { stdio: boolean; port?: number }): Promise<void> {
@@ -171,16 +53,11 @@ async function cmdStart(opts: { stdio: boolean; port?: number }): Promise<void> 
     if (!cfg.repos || cfg.repos.length === 0) {
         const g = getGitRemoteOwnerRepo();
         if (g) {
-            console.log(`no config found, auto-detecting ${g.owner}/${g.repo} from git remote`);
-            await cmdInit(
-                `${g.owner}/${g.repo}`,
-                opts.port !== undefined ? String(opts.port) : undefined,
-            );
+            const port = opts.port ?? cfg.port ?? 0;
+            await ensureRepoConfig(g.owner, g.repo, port);
             cfg = await loadConfig();
         } else {
-            console.log(
-                "no repos configured — polling fallback active until you run: npx agent-actions-await init owner/repo",
-            );
+            console.log("no repos configured — polling fallback active");
         }
     }
     const bus = new EventBus();
@@ -196,14 +73,12 @@ async function cmdStart(opts: { stdio: boolean; port?: number }): Promise<void> 
     });
     console.log(`webhook receiver listening ${url} (health ${url}/health)`);
 
-    // Fallback poller with GHE-aware auth per repo (uses env tokens)
     const poller = new FallbackPoller(wm, {
         intervalMs: (cfg.pollIntervalSeconds ?? 15) * 1000,
         graceMs: (cfg.pollGraceSeconds ?? 30) * 1000,
     });
     poller.start();
 
-    // Tunnel with restart watcher and webhook re-PATCH (Q16)
     try {
         const bin = await ensureCloudflared();
         const hooks = cfg.repos
@@ -220,7 +95,9 @@ async function cmdStart(opts: { stdio: boolean; port?: number }): Promise<void> 
                     patch: async (o, r, id, u) => {
                         execSync(
                             `gh api --method PATCH repos/${o}/${r}/hooks/${id} -f config[url]=${u}`,
-                            { stdio: "ignore" },
+                            {
+                                stdio: "ignore",
+                            },
                         );
                     },
                     create: async (o, r, u) => {
@@ -251,42 +128,21 @@ async function cmdStart(opts: { stdio: boolean; port?: number }): Promise<void> 
         await mcp.connect(transport);
         console.log("MCP stdio server connected");
     } else {
-        // For Streamable HTTP, we share same port's /mcp? Not yet — log hint
         console.log("MCP stdio ready; for HTTP use --stdio or configure harness to spawn stdio");
         console.log(`Pending watches: ${wm.handleCount()}`);
     }
 
-    // Keep alive
     await new Promise(() => {});
 }
 
 async function main(): Promise<void> {
     const args = process.argv.slice(2);
-    if (args.length === 0 || args.includes("--help") || args.includes("-h")) usage();
+    if (args.length === 0) {
+        await cmdStart({ stdio: true });
+        return;
+    }
+    if (args.includes("--help") || args.includes("-h")) usage();
     const cmd = args[0];
-    if (cmd === "init") {
-        const repo = args[1] && !args[1]!.startsWith("--") ? args[1] : undefined;
-        const port = parsePortArg(args);
-        const portStr = port !== undefined ? String(port) : undefined;
-        await cmdInit(repo, portStr);
-        return;
-    }
-    if (cmd === "setup") {
-        const repo = args[1] && !args[1]!.startsWith("--") ? args[1] : undefined;
-        const port = parsePortArg(args);
-        const portStr = port !== undefined ? String(port) : undefined;
-        await cmdInit(repo, portStr);
-        console.log("\nnext: add to your harness");
-        console.log(
-            "  claude mcp add agent-actions-await -- npx -y agent-actions-await start --stdio",
-        );
-        console.log("  or copy examples/mcp.json");
-        return;
-    }
-    if (cmd === "doctor") {
-        await cmdDoctor();
-        return;
-    }
     if (cmd === "start") {
         const stdio = shouldUseStdio(args);
         const p = parsePortArg(args);
