@@ -15,7 +15,7 @@ import {
 } from "../src/config.js";
 import { ensureCloudflared } from "../src/tunnel.js";
 import { TunnelManager, repatchWebhookWithRetry } from "../src/tunnel-manager.js";
-import { buildHookPayload, parsePortArg, shouldUseStdio, usageText } from "../src/cli-helpers.js";
+import { buildHookPayload, usageText } from "../src/cli-helpers.js";
 import { getGitRemoteOwnerRepo } from "../src/git.js";
 
 function usage(): never {
@@ -30,7 +30,6 @@ async function ensureRepoConfig(owner: string, repo: string, port: number): Prom
     const secretPath = await ensureSecret(owner, repo);
     const secret = await readSecret(owner, repo);
     if (!secret) throw new Error("failed to create secret");
-    // try webhook if gh authed, otherwise leave hookId pending and rely on poll
     try {
         execSync("gh auth status", { stdio: "ignore" });
         const hookUrl = `https://placeholder.trycloudflare.com/webhook`;
@@ -48,13 +47,12 @@ async function ensureRepoConfig(owner: string, repo: string, port: number): Prom
     await saveConfig(cfg);
 }
 
-async function cmdStart(opts: { stdio: boolean; port?: number }): Promise<void> {
+async function cmdStart(): Promise<void> {
     let cfg = await loadConfig();
     if (!cfg.repos || cfg.repos.length === 0) {
         const g = getGitRemoteOwnerRepo();
         if (g) {
-            const port = opts.port ?? cfg.port ?? 0;
-            await ensureRepoConfig(g.owner, g.repo, port);
+            await ensureRepoConfig(g.owner, g.repo, cfg.port ?? 0);
             cfg = await loadConfig();
         } else {
             console.log("no repos configured — polling fallback active");
@@ -64,11 +62,10 @@ async function cmdStart(opts: { stdio: boolean; port?: number }): Promise<void> 
     const wm = new WatchManager(bus);
     const getSecret = makeSecretGetter();
 
-    const port = opts.port ?? cfg.port ?? 0;
     const { port: actualPort, url } = await createHttpServer({
         bus,
         getSecret,
-        port,
+        port: cfg.port ?? 0,
         host: "127.0.0.1",
     });
     console.log(`webhook receiver listening ${url} (health ${url}/health)`);
@@ -122,32 +119,17 @@ async function cmdStart(opts: { stdio: boolean; port?: number }): Promise<void> 
         );
     }
 
-    if (opts.stdio) {
-        const mcp = createMcpServer({ bus, watchManager: wm });
-        const transport = new StdioServerTransport();
-        await mcp.connect(transport);
-        console.log("MCP stdio server connected");
-    } else {
-        console.log("MCP stdio ready; for HTTP use --stdio or configure harness to spawn stdio");
-        console.log(`Pending watches: ${wm.handleCount()}`);
-    }
-
+    const mcp = createMcpServer({ bus, watchManager: wm });
+    const transport = new StdioServerTransport();
+    await mcp.connect(transport);
+    console.log("MCP stdio server connected");
     await new Promise(() => {});
 }
 
 async function main(): Promise<void> {
     const args = process.argv.slice(2);
     if (args.includes("--help") || args.includes("-h")) usage();
-    // allow deprecated `start` as alias: `npx agent-actions-await start` still works
-    const filtered = args.filter((a) => a !== "start");
-    const unknown = filtered.find((a) => !a.startsWith("-"));
-    if (unknown) {
-        console.error(`unknown argument: ${unknown}`);
-        usage();
-    }
-    const stdio = shouldUseStdio(filtered);
-    const p = parsePortArg(filtered);
-    await cmdStart({ stdio, ...(p !== undefined ? { port: p } : {}) });
+    await cmdStart();
 }
 
 main().catch((e: unknown) => {
