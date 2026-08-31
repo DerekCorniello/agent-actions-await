@@ -11,6 +11,8 @@ export type TunnelManagerOpts = {
   repatch?: RepatchFn;
   hooks?: Array<{ owner: string; repo: string; hookId: number }>;
   backoffMs?: number;
+  ensureBin?: () => Promise<string>;
+  start?: typeof startTunnel;
 };
 
 export class TunnelManager {
@@ -37,9 +39,10 @@ export class TunnelManager {
   }
 
   private async launch(): Promise<string> {
-    const bin = this.opts.binPath ?? (await ensureCloudflared().catch(() => "cloudflared"));
+    const bin = this.opts.binPath ?? (await (this.opts.ensureBin?.() ?? ensureCloudflared()).catch(() => "cloudflared"));
     this.binPath = bin;
-    this.tunnel = await startTunnel(this.opts.port, bin);
+    const start = this.opts.start ?? startTunnel;
+    this.tunnel = await start(this.opts.port, bin);
     const url = this.tunnel.url;
     this.opts.onUrl?.(url);
     await this.repatchAll(url);
