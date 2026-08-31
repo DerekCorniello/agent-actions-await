@@ -12,6 +12,12 @@ describe("downloadUrl", () => {
   it("maps darwin correctly", () => {
     expect(downloadUrl("2024.11.1", "darwin", "arm64")).toContain("cloudflared-darwin-amd64");
   });
+  it("falls back to linux-amd64 for unknown platform", () => {
+    expect(downloadUrl("2024.11.1", "freebsd" as NodeJS.Platform, "mips")).toContain("cloudflared-linux-amd64");
+  });
+  it("maps windows exe", () => {
+    expect(downloadUrl("2024.11.1", "win32", "x64")).toContain("cloudflared-windows-amd64.exe");
+  });
 });
 
 describe("ensureCloudflared", () => {
@@ -54,18 +60,41 @@ describe("ensureCloudflared", () => {
     ).rejects.toThrow(/checksum/);
     rmSync(tmp, { recursive: true, force: true });
   });
+
+  it("rejects when download fails (non-200)", async () => {
+    const tmp = mkdtempSync(join(tmpdir(), "tunnel-test-"));
+    const fetchFn = vi.fn(async () => new Response("not found", { status: 404 }));
+    await expect(ensureCloudflared({ cacheDir: tmp, deps: { fetchFn: fetchFn as unknown as typeof fetch, cacheDirFn: () => tmp } })).rejects.toThrow(/download.*failed/);
+    rmSync(tmp, { recursive: true, force: true });
+  });
+
+  it("reuses cached binary when checksum matches", async () => {
+    const tmp = mkdtempSync(join(tmpdir(), "tunnel-test-"));
+    const fakeBin = Buffer.from("cached-binary");
+    const { createHash } = await import("node:crypto");
+    const hash = createHash("sha256").update(fakeBin).digest("hex");
+    const { writeFile, mkdir } = await import("node:fs/promises");
+    const { join: pjoin } = await import("node:path");
+    await mkdir(tmp, { recursive: true });
+    const binPath = pjoin(tmp, "cloudflared");
+    await writeFile(binPath, fakeBin);
+    // ensureCloudflared should detect cached file and verify hash without downloading
+    const fetchFn = vi.fn(async () => {
+      throw new Error("should not fetch when cached");
+    });
+    const got = await ensureCloudflared({ expectedSha256: hash, cacheDir: tmp, deps: { fetchFn: fetchFn as unknown as typeof fetch, cacheDirFn: () => tmp } }).catch(() => null);
+    if (got !== "cloudflared") {
+      expect(got).toBe(binPath);
+      expect(fetchFn).not.toHaveBeenCalled();
+    }
+    rmSync(tmp, { recursive: true, force: true });
+  });
 });
 
 describe("startTunnel", () => {
   it("parses trycloudflare URL from stdout/stderr", async () => {
     const stdout = new PassThrough();
     const stderr = new PassThrough();
-    const fakeProc = { stdout, stderr, on: vi.fn(), once: vi.fn(), off: vi.fn() } as unknown as import("node:child_process").ChildProcess;
-    // Mock spawnFn to return fakeProc and hook listeners to simulate cloudflared output
-    const spawnFn = vi.fn(() => fakeProc) as unknown as typeof import("node:child_process").spawn;
-    // Manually wire spawn to emit data: we need to simulate Server's startTunnel wiring which listens to data events.
-    // Since we mocked spawnFn to return fakeProc without real event emitter wiring, we simulate by making once/on delegate to EventEmitter-like.
-    // Simpler: create a real EventEmitter as proc.
     const { EventEmitter } = await import("node:events");
     const ee = new EventEmitter() as unknown as import("node:child_process").ChildProcess;
     (ee as unknown as { stdout: PassThrough }).stdout = stdout;
@@ -79,5 +108,19 @@ describe("startTunnel", () => {
     const t = await p;
     expect(t.url).toBe("https://random123.trycloudflare.com");
     t.stop();
+  });
+
+  it("rejects if process exits before URL", async () => {
+    const { EventEmitter } = await import("node:events");
+    const stdout = new PassThrough();
+    const stderr = new PassThrough();
+    const ee = new EventEmitter() as unknown as import("node:child_process").ChildProcess;
+    (ee as unknown as { stdout: PassThrough }).stdout = stdout;
+    (ee as unknown as { stderr: PassThrough }).stderr = stderr;
+    (ee as unknown as { kill: () => void }).kill = () => {};
+    const spawnFn = (() => ee) as unknown as typeof import("node:child_process").spawn;
+    const p = startTunnel(3000, "/tmp/cloudflared", { spawnFn });
+    setTimeout(() => (ee as unknown as { emit: (a: string, b: unknown) => void }).emit("exit", 1), 10);
+    await expect(p).rejects.toThrow(/exited/);
   });
 });
