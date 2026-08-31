@@ -14,22 +14,13 @@ You run one process locally. It opens a quick Cloudflare tunnel, registers a Git
 claude mcp add agent-actions-await -- npx -y agent-actions-await start --stdio
 ```
 
-That is it. Restart the harness and you are done. The first `start` auto-detects `owner/repo` from `git remote get-url origin` `src/git.ts:14`, creates `~/.config/agent-actions-await/secrets/owner__repo.txt` `600` and `~/.config/agent-actions-await/config.json` `src/config.ts:29`, and tries `gh api repos/owner/repo/hooks` if `gh` is logged in. Poll fallback `src/poller.ts:1` 30s grace then 15s works even without a hook, so you can use it right away and add the webhook later.
+That is it. Restart the harness and you are done. `start` on first boot auto-detects `owner/repo` from `git remote get-url origin` `src/git.ts:14`, creates `~/.config/agent-actions-await/secrets/owner__repo.txt` `600` and `config.json` `src/config.ts:29`, and tries `gh api` if logged in. Poll fallback `src/poller.ts:1` works without a hook, so it is usable right away.
 
-If you prefer to set it up before adding to the harness:
+`bin/cli.ts:129` on every start:
 
-```sh
-npx agent-actions-await init          # no arg, reads git remote
-npx agent-actions-await init owner/repo
-npx agent-actions-await setup         # same as init then prints the claude line
-npx agent-actions-await doctor        # shows config, gh status, cloudflared cache
-```
-
-`start` alone is enough — `bin/cli.ts:129` checks `~/.config` on boot and auto-inits from git remote if empty, then:
-
-- picks a free port on `127.0.0.1`, starts the webhook receiver at `POST /webhook` and `GET /health` `src/http-server.ts:22`
-- starts or reuses a `cloudflared` quick tunnel and exposes the webhook, starts a fallback poller (30s grace, then every 15s) `src/tunnel-manager.ts:16` with 2s restart and re-PATCH `Q16`
-- connects an MCP server over stdio with three tools
+- picks a free port on `127.0.0.1`, starts `POST /webhook` and `GET /health` `src/http-server.ts:22`
+- opens a `cloudflared` quick tunnel `src/tunnel-manager.ts:16` with 2s restart and re-PATCH `Q16`
+- connects the MCP server over stdio
 
 Polling and GH host are configurable globally and per call. It works with `github.com` and GitHub Enterprise via `GITHUB_API_URL` or `GH_HOST`.
 
@@ -45,14 +36,9 @@ Filter is an exact check name or list of names, or `all`. I chose exact match on
 
 If the PR gets a new push while you wait, the watch resets to the new `sha` and refetches checks. If the PR is closed or merged, it completes right away.
 
-## Connect a client — one line per harness
+## Connect a client
 
-```sh
-claude mcp add agent-actions-await -- npx -y agent-actions-await start --stdio
-# or for opencode / codex / cursor — same shape, or copy examples/mcp.json
-```
-
-Stdio is the safest bet. If your harness uses a file, add this to `mcp.json` or `claude.json`:
+If your harness uses a file, add this to `mcp.json`:
 
 ```json
 {
@@ -65,7 +51,7 @@ Stdio is the safest bet. If your harness uses a file, add this to `mcp.json` or 
 }
 ```
 
-`examples/mcp.json` has the same. After `setup`, just run the `claude mcp add ...` line it prints and you are done.
+`examples/mcp.json` has the same. `claude mcp add` and `opencode mcp add` use the same `npx -y agent-actions-await start --stdio` shape.
 
 HTTP also works on the same local port if your harness needs it, but the tunnel only exposes `/webhook`. The MCP part stays on `127.0.0.1`.
 

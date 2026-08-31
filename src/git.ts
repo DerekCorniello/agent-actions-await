@@ -24,6 +24,7 @@ export function parseRemoteUrl(remote: string): { owner: string; repo: string } 
 export function getGitRemoteOwnerRepo(cwd = process.cwd()): { owner: string; repo: string } | null {
     try {
         const out = execSync("git remote get-url origin", {
+            cwd,
             encoding: "utf8",
             stdio: ["ignore", "pipe", "ignore"],
         }).trim();
