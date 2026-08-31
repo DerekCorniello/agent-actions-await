@@ -1,40 +1,18 @@
 #!/usr/bin/env node
-import { readFileSync, existsSync } from "node:fs";
-import { execSync, spawn } from "node:child_process";
-import { homedir } from "node:os";
+import { execSync } from "node:child_process";
 import { createHttpServer } from "../src/http-server.js";
 import { EventBus } from "../src/bus.js";
 import { WatchManager } from "../src/watch-manager.js";
 import { FallbackPoller } from "../src/poller.js";
 import { createMcpServer } from "../src/mcp-server.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { loadConfig, saveConfig, ensureSecret, readSecret, makeSecretGetter, configPath, type AppConfig } from "../src/config.js";
-import { ensureCloudflared, startTunnel, cloudflaredBinaryPath } from "../src/tunnel.js";
+import { loadConfig, saveConfig, ensureSecret, readSecret, makeSecretGetter, configPath } from "../src/config.js";
+import { ensureCloudflared, startTunnel } from "../src/tunnel.js";
+import { parseOwnerRepo, usageText, buildHookPayload, parsePortArg, shouldUseStdio } from "../src/cli-helpers.js";
 
 function usage(): never {
-  console.log(`agent-actions-await — wait on GitHub PR checks without polling in bash
-
-Usage:
-  npx agent-actions-await init <owner/repo> [--port N]
-  npx agent-actions-await start [--stdio] [--port N]
-
-Commands:
-  init  Register webhook for repo (via gh CLI if available), generate per-repo secret
-  start Start tunnel + webhook receiver + MCP server (stdio default, HTTP on port)
-
-Options:
-  --help  Show this help
-`);
+  console.log(usageText());
   process.exit(0);
-}
-
-function parseOwnerRepo(arg: string): { owner: string; repo: string } {
-  const [owner, repo] = arg.split("/");
-  if (!owner || !repo) {
-    console.error("expected <owner/repo> e.g. acme/demo");
-    process.exit(1);
-  }
-  return { owner, repo };
 }
 
 async function cmdInit(ownerRepo: string, portArg?: string): Promise<void> {
@@ -81,11 +59,7 @@ async function cmdInit(ownerRepo: string, portArg?: string): Promise<void> {
       server.close();
       const hookUrl = `${url}/webhook`;
       // Try gh api to create hook
-      const payload = JSON.stringify({
-        config: { url: hookUrl, content_type: "json", secret, insecure_ssl: "0" },
-        events: ["check_suite", "check_run", "workflow_run", "pull_request", "status"],
-        active: true,
-      });
+      const payload = buildHookPayload(hookUrl, secret);
       try {
         const out = execSync(`gh api repos/${owner}/${repo}/hooks --input -`, { input: payload, encoding: "utf8" });
         const j = JSON.parse(out) as { id: number };
@@ -190,16 +164,15 @@ async function main(): Promise<void> {
       console.error("init requires <owner/repo>");
       process.exit(1);
     }
-    const portIdx = args.indexOf("--port");
-    const port = portIdx >= 0 ? args[portIdx + 1] : undefined;
-    await cmdInit(repo, port);
+    const port = parsePortArg(args);
+    const portStr = port !== undefined ? String(port) : undefined;
+    await cmdInit(repo, portStr);
     return;
   }
   if (cmd === "start") {
-    const stdio = !args.includes("--http-only");
-    const portIdx = args.indexOf("--port");
-    const port = portIdx >= 0 ? Number(args[portIdx + 1]) : undefined;
-    await cmdStart({ stdio, ...(port !== undefined ? { port } : {}) });
+    const stdio = shouldUseStdio(args);
+    const p = parsePortArg(args);
+    await cmdStart({ stdio, ...(p !== undefined ? { port: p } : {}) });
     return;
   }
   console.error(`unknown command: ${cmd}`);
