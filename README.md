@@ -8,22 +8,27 @@ I got tired of agents doing `sleep 10 && gh pr checks` over and over. This runs 
 
 You run one process locally. It opens a quick Cloudflare tunnel, registers a GitHub webhook to that tunnel URL, and holds an in-memory bus keyed by `owner/repo@sha`. When GitHub posts `check_run` or `workflow_run` events, the server normalizes them and resolves the waiting tool call. If webhooks get dropped, it polls the GitHub API on a backoff instead. No hosted service. No extra accounts. You run it, you own it.
 
-## Install
+## Setup — one command if you are in a git repo
 
 ```sh
-npx agent-actions-await init owner/repo
-npx agent-actions-await start
+npx agent-actions-await setup
+# or: npx agent-actions-await init
+# or: npx agent-actions-await init owner/repo
 ```
 
+`setup` is the same as `init` then prints the line to copy for your harness. With no arg it reads `git remote get-url origin` so you do not have to type `owner/repo`. If you skip `init` entirely, `start` will auto-detect the repo and init for you.
+
 `init` does three things:
+
 - creates a per-repo webhook secret in `~/.config/agent-actions-await/secrets/owner__repo.txt` with 600 perms
-- tries `gh api repos/owner/repo/hooks` if `gh` is logged in, else prints the URL and secret so you can add the hook by hand
-- writes `~/.config/agent-actions-await/config.json` with the repo and port
+- tries `gh api repos/owner/repo/hooks` if `gh` is logged in, else prints the URL and secret so you can add the hook by hand. Poll fallback works even without a hook, so you can use it right away and add the webhook later.
+- writes `~/.config/agent-actions-await/config.json` with the repo and port. Run `npx agent-actions-await doctor` to see what is configured, whether `gh` is authed, and whether `cloudflared` is cached.
 
 `start`:
+
 - picks a free port on `127.0.0.1`, starts the webhook receiver at `POST /webhook` and `GET /health`
 - starts or reuses a `cloudflared` quick tunnel and exposes the webhook, starts a fallback poller (30s grace, then every 15s)
-- connects an MCP server over stdio with three tools
+- connects an MCP server over stdio with three tools. If no config exists it auto-inits from git remote first.
 
 Polling and GH host are configurable globally and per call. It works with `github.com` and GitHub Enterprise via `GITHUB_API_URL` or `GH_HOST`.
 
@@ -39,22 +44,27 @@ Filter is an exact check name or list of names, or `all`. I chose exact match on
 
 If the PR gets a new push while you wait, the watch resets to the new `sha` and refetches checks. If the PR is closed or merged, it completes right away.
 
-## Connect a client
+## Connect a client — one line per harness
 
-Stdio is the safest bet. Add this to your MCP config.
+```sh
+claude mcp add agent-actions-await -- npx -y agent-actions-await start --stdio
+# or for opencode / codex / cursor — same shape, or copy examples/mcp.json
+```
 
-For opencode or Claude Code (`mcp.json` or `claude.json`):
+Stdio is the safest bet. If your harness uses a file, add this to `mcp.json` or `claude.json`:
 
 ```json
 {
-  "mcpServers": {
-    "agent-actions-await": {
-      "command": "npx",
-      "args": ["agent-actions-await", "start", "--stdio"]
+    "mcpServers": {
+        "agent-actions-await": {
+            "command": "npx",
+            "args": ["-y", "agent-actions-await", "start", "--stdio"]
+        }
     }
-  }
 }
 ```
+
+`examples/mcp.json` has the same. After `setup`, just run the `claude mcp add ...` line it prints and you are done.
 
 HTTP also works on the same local port if your harness needs it, but the tunnel only exposes `/webhook`. The MCP part stays on `127.0.0.1`.
 

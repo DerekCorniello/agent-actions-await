@@ -23,14 +23,25 @@ import {
     parsePortArg,
     shouldUseStdio,
 } from "../src/cli-helpers.js";
+import { getGitRemoteOwnerRepo } from "../src/git.js";
 
 function usage(): never {
     console.log(usageText());
     process.exit(0);
 }
 
-async function cmdInit(ownerRepo: string, portArg?: string): Promise<void> {
-    const { owner, repo } = parseOwnerRepo(ownerRepo);
+async function cmdInit(ownerRepo: string | undefined, portArg?: string): Promise<void> {
+    const resolved =
+        ownerRepo ??
+        (() => {
+            const g = getGitRemoteOwnerRepo();
+            if (!g)
+                throw new Error(
+                    "no owner/repo given and git remote origin not found — run: npx agent-actions-await init owner/repo",
+                );
+            return `${g.owner}/${g.repo}`;
+        })();
+    const { owner, repo } = parseOwnerRepo(resolved);
     const cfg = await loadConfig();
     const port = portArg ? Number(portArg) : (cfg.port ?? 0);
     if (!cfg.repos) cfg.repos = [];
@@ -126,8 +137,52 @@ async function cmdInit(ownerRepo: string, portArg?: string): Promise<void> {
     console.log(`config written to ${configPath()} (hookId pending)`);
 }
 
-async function cmdStart(opts: { stdio: boolean; port?: number }): Promise<void> {
+async function cmdDoctor(): Promise<void> {
     const cfg = await loadConfig();
+    console.log(`config: ${configPath()}`);
+    console.log(JSON.stringify(cfg, null, 2));
+    try {
+        const out = execSync("gh auth status 2>&1", { encoding: "utf8" });
+        console.log(out.trim().split("\n")[0]);
+    } catch {
+        console.log("gh: not authenticated — poll fallback will be used");
+    }
+    try {
+        const bin = await ensureCloudflared();
+        console.log(`cloudflared: ${bin}`);
+    } catch (e: unknown) {
+        console.log(`cloudflared: not found — ${(e as Error).message}`);
+    }
+    for (const r of cfg.repos) {
+        const s = await readSecret(r.owner, r.repo);
+        console.log(
+            `${r.owner}/${r.repo} hookId=${r.hookId ?? "pending"} secret=${s ? `${s.slice(0, 8)}...` : "missing"}`,
+        );
+    }
+    if (cfg.repos.length === 0)
+        console.log("no repos configured — run: npx agent-actions-await init");
+    console.log("\nharness quick add:");
+    console.log("  claude mcp add agent-actions-await -- npx -y agent-actions-await start --stdio");
+    console.log("  opencode: copy examples/mcp.json to ~/.config/opencode/mcp.json");
+}
+
+async function cmdStart(opts: { stdio: boolean; port?: number }): Promise<void> {
+    let cfg = await loadConfig();
+    if (!cfg.repos || cfg.repos.length === 0) {
+        const g = getGitRemoteOwnerRepo();
+        if (g) {
+            console.log(`no config found, auto-detecting ${g.owner}/${g.repo} from git remote`);
+            await cmdInit(
+                `${g.owner}/${g.repo}`,
+                opts.port !== undefined ? String(opts.port) : undefined,
+            );
+            cfg = await loadConfig();
+        } else {
+            console.log(
+                "no repos configured — polling fallback active until you run: npx agent-actions-await init owner/repo",
+            );
+        }
+    }
     const bus = new EventBus();
     const wm = new WatchManager(bus);
     const getSecret = makeSecretGetter();
@@ -210,14 +265,26 @@ async function main(): Promise<void> {
     if (args.length === 0 || args.includes("--help") || args.includes("-h")) usage();
     const cmd = args[0];
     if (cmd === "init") {
-        const repo = args[1];
-        if (!repo) {
-            console.error("init requires <owner/repo>");
-            process.exit(1);
-        }
+        const repo = args[1] && !args[1]!.startsWith("--") ? args[1] : undefined;
         const port = parsePortArg(args);
         const portStr = port !== undefined ? String(port) : undefined;
         await cmdInit(repo, portStr);
+        return;
+    }
+    if (cmd === "setup") {
+        const repo = args[1] && !args[1]!.startsWith("--") ? args[1] : undefined;
+        const port = parsePortArg(args);
+        const portStr = port !== undefined ? String(port) : undefined;
+        await cmdInit(repo, portStr);
+        console.log("\nnext: add to your harness");
+        console.log(
+            "  claude mcp add agent-actions-await -- npx -y agent-actions-await start --stdio",
+        );
+        console.log("  or copy examples/mcp.json");
+        return;
+    }
+    if (cmd === "doctor") {
+        await cmdDoctor();
         return;
     }
     if (cmd === "start") {

@@ -13,14 +13,17 @@ describe("cli", () => {
         expect(existsSync("dist/bin/cli.js")).toBe(true);
     });
 
-    it("init help without arg exits with error", () => {
+    it("init with bad owner/repo exits with error", () => {
         try {
-            execFileSync("node", ["dist/bin/cli.js", "init"], { encoding: "utf8", stdio: "pipe" });
+            execFileSync("node", ["dist/bin/cli.js", "init", "bad"], {
+                encoding: "utf8",
+                stdio: "pipe",
+            });
             expect(false).toBe(true);
         } catch (e) {
             const err = e as { stderr?: string; stdout?: string; message: string };
             const msg = (err.stderr ?? err.stdout ?? err.message) as string;
-            expect(String(msg).toLowerCase()).toMatch(/owner\/repo|requires/);
+            expect(String(msg).toLowerCase()).toMatch(/owner\/repo|expected/);
         }
     });
 });
