@@ -2,7 +2,11 @@
     "mcpServers": {
         "agent-actions-await": {
             "command": "npx",
-            "args": ["-y", "agent-actions-await"],
+            "args": [
+                "-y",
+                "agent-actions-await",
+                "--polling-only"
+            ],
             "env": {}
         }
     }

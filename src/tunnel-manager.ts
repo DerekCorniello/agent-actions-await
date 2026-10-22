@@ -6,7 +6,7 @@ export type RepatchFn = (
     repo: string,
     hookId: number,
     newUrl: string,
-) => Promise<void>;
+) => Promise<number | undefined>;
 
 export type TunnelManagerOpts = {
     port: number;
@@ -85,7 +85,8 @@ export class TunnelManager {
         if (!this.opts.repatch || !this.opts.hooks) return;
         for (const h of this.opts.hooks) {
             try {
-                await this.opts.repatch(h.owner, h.repo, h.hookId, newUrl);
+                const updatedHookId = await this.opts.repatch(h.owner, h.repo, h.hookId, newUrl);
+                if (typeof updatedHookId === "number") h.hookId = updatedHookId;
             } catch (e: unknown) {
                 // Q16: retry PATCH with backoff, fallback to recreate, 401 prompt
                 // For now, surface error and continue; caller can implement fallback
@@ -105,12 +106,12 @@ export async function repatchWebhookWithRetry(
         create: (owner: string, repo: string, url: string) => Promise<number>;
         onError?: (err: Error) => void;
     },
-): Promise<void> {
+): Promise<number> {
     const maxRetries = 3;
     for (let attempt = 0; attempt < maxRetries; attempt++) {
         try {
             await deps.patch(owner, repo, hookId, newUrl);
-            return;
+            return hookId;
         } catch (e: unknown) {
             const msg = (e as Error).message;
             if (msg.includes("401") || msg.toLowerCase().includes("unauthorized")) {
@@ -121,11 +122,12 @@ export async function repatchWebhookWithRetry(
                 // hook deleted — recreate
                 const newId = await deps.create(owner, repo, newUrl);
                 deps.onError?.(new Error(`recreated hook ${newId} for ${owner}/${repo} after 404`));
-                return;
+                return newId;
             }
             if (attempt === maxRetries - 1) throw e;
             const backoff = Math.pow(2, attempt) * 500 + Math.random() * 200;
             await new Promise((r) => setTimeout(r, backoff));
         }
     }
+    throw new Error(`failed to update webhook for ${owner}/${repo}`);
 }

@@ -1,22 +1,22 @@
-import { getChecksForSha, type GhAuth, type FetchFn } from "./github.js";
+import { getChecksForSha, getPrFeedback, getPrInfo, type GhAuth, type FetchFn } from "./github.js";
 import type { WatchManager } from "./watch-manager.js";
 
 export type PollerOpts = {
-    graceMs?: number; // 30s per Q12
-    intervalMs?: number; // 15s per Q18
-    fetchFn?: FetchFn | undefined;
-    env?: NodeJS.ProcessEnv | undefined;
+    graceMs?: number;
+    intervalMs?: number;
+    fetchFn?: FetchFn;
+    env?: NodeJS.ProcessEnv;
     getAuth?: (owner: string, repo: string) => GhAuth | undefined;
+    getPrInfoFn?: typeof getPrInfo;
+    getPrFeedbackFn?: typeof getPrFeedback;
 };
 
-/**
- * Fallback safety net (Q12): if no webhook arrives within grace window,
- * poll GitHub REST every interval. Uses exponential backoff via github helpers.
- * This supplements bus-driven completion; it never replaces it.
- */
+/** Reconcile PR lifecycle, current head, checks, and feedback for pending watches. */
 export class FallbackPoller {
     private timer: NodeJS.Timeout | undefined;
     private stopped = false;
+    private polling = false;
+
     constructor(
         private readonly wm: WatchManager,
         private readonly opts: PollerOpts = {},
@@ -27,53 +27,96 @@ export class FallbackPoller {
         this.stopped = false;
         const intervalMs = this.opts.intervalMs ?? 15_000;
         const graceMs = this.opts.graceMs ?? 30_000;
-        let first = true;
-        const tick = async () => {
-            if (this.stopped) return;
-            // grace on first tick: wait graceMs before first poll (so webhook has chance)
-            if (first) {
-                first = false;
-                this.timer = setTimeout(() => {
-                    void this.pollOnce();
-                    this.timer = setInterval(() => void this.pollOnce(), intervalMs);
-                    this.timer.unref?.();
-                }, graceMs);
-                this.timer.unref?.();
-                return;
-            }
-            await this.pollOnce();
-        };
-        void tick();
+        this.timer = setTimeout(() => {
+            this.timer = setInterval(() => {
+                void this.pollOnce();
+            }, intervalMs);
+            this.timer.unref?.();
+            void this.pollOnce();
+        }, graceMs);
+        this.timer.unref?.();
     }
 
     stop(): void {
         this.stopped = true;
-        if (this.timer) clearTimeout(this.timer);
-        if (this.timer) clearInterval(this.timer as unknown as NodeJS.Timeout);
+        if (this.timer) {
+            clearTimeout(this.timer);
+            clearInterval(this.timer);
+        }
         this.timer = undefined;
     }
 
     async pollOnce(): Promise<void> {
-        const handles = this.wm.pendingHandles();
-        for (const h of handles) {
-            const st = this.wm.getStatus(h);
-            if ("error" in st) continue;
-            // peek without consuming GC
-            if (st.state !== "pending") continue;
-            const auth = this.opts.getAuth?.(st.owner, st.repo);
-            try {
-                const fresh = await getChecksForSha({
-                    owner: st.owner,
-                    repo: st.repo,
-                    sha: st.sha,
-                    auth,
-                    fetchFn: this.opts.fetchFn,
-                    env: this.opts.env,
-                });
-                this.wm.applyPolledChecks(h, fresh);
-            } catch {
-                // swallow per-poll errors (rate limit, network); next interval retries
+        if (this.polling || this.stopped) return;
+        this.polling = true;
+        try {
+            for (const handle of this.wm.pendingHandles()) {
+                if (this.stopped) break;
+                const status = this.wm.getStatus(handle);
+                if (!("state" in status) || status.state !== "pending") continue;
+                const snapshot = this.wm.getPollSnapshot(handle);
+                if (!snapshot) continue;
+                const auth = this.opts.getAuth?.(status.owner, status.repo);
+
+                try {
+                    const info = await (this.opts.getPrInfoFn ?? getPrInfo)({
+                        owner: status.owner,
+                        repo: status.repo,
+                        prNumber: status.prNumber,
+                        auth,
+                        fetchFn: this.opts.fetchFn,
+                        env: this.opts.env,
+                    });
+                    await this.wm.reconcilePr(handle, info, snapshot.sha, snapshot.revision);
+                    const current = this.wm.getStatus(handle);
+                    if (
+                        status.mode !== "feedback" &&
+                        "state" in current &&
+                        current.state === "pending" &&
+                        current.sha
+                    ) {
+                        const checkSnapshot = this.wm.getPollSnapshot(handle);
+                        if (checkSnapshot) {
+                            const checks = await getChecksForSha({
+                                owner: current.owner,
+                                repo: current.repo,
+                                sha: current.sha,
+                                auth,
+                                fetchFn: this.opts.fetchFn,
+                                env: this.opts.env,
+                            });
+                            this.wm.applyPolledChecks(
+                                handle,
+                                checks,
+                                current.sha,
+                                checkSnapshot.revision,
+                            );
+                        }
+                    }
+                } catch (error) {
+                    this.wm.recordPollError(handle, error);
+                }
+
+                if (status.mode !== "checks") {
+                    const latest = this.wm.getStatus(handle);
+                    if (!("state" in latest) || latest.state !== "pending") continue;
+                    try {
+                        const feedback = await (this.opts.getPrFeedbackFn ?? getPrFeedback)({
+                            owner: status.owner,
+                            repo: status.repo,
+                            prNumber: status.prNumber,
+                            auth,
+                            fetchFn: this.opts.fetchFn,
+                            env: this.opts.env,
+                        });
+                        this.wm.applyPolledFeedback(handle, feedback, snapshot.feedbackRevision);
+                    } catch (error) {
+                        this.wm.recordPollError(handle, error);
+                    }
+                }
             }
+        } finally {
+            this.polling = false;
         }
     }
 }

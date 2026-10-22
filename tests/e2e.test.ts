@@ -13,17 +13,26 @@ describe("e2e http+bus+watch", () => {
     it("watch pending then webhook arrives via http and watch completes", async () => {
         const SECRET = "e".repeat(64);
         const bus = new EventBus();
-        const getPrHeadSha = vi.fn(async () => "e2e-sha");
-        const getChecks = vi.fn(async () => [
-            { name: "ci", status: "in_progress", conclusion: null, sha: "e2e-sha" },
-        ]);
+        const getPrInfo = vi.fn(async () => ({
+            sha: "e2e-sha",
+            state: "open" as const,
+            merged: false,
+        }));
+        const getChecks = vi
+            .fn()
+            .mockResolvedValueOnce([
+                { name: "ci", status: "in_progress", conclusion: null, sha: "e2e-sha" },
+            ])
+            .mockResolvedValue([
+                { name: "ci", status: "completed", conclusion: "success", sha: "e2e-sha" },
+            ]);
         const wm = new WatchManager(
             bus,
             {
-                getPrHeadShaFn: getPrHeadSha as unknown as typeof getPrHeadSha,
+                getPrInfoFn: getPrInfo,
                 getChecksFn: getChecks as unknown as typeof getChecks,
             },
-            { defaultTimeoutMs: 5000 },
+            { defaultTimeoutMs: 5000, graceMs: 0, settleMs: 1 },
         );
 
         const handle = await wm.startWatch({ owner: "acme", repo: "demo", prNumber: 99 });
@@ -55,7 +64,10 @@ describe("e2e http+bus+watch", () => {
             body,
         });
         expect(res.status).toBe(200);
-        await new Promise((r) => setTimeout(r, 20));
+        await vi.waitFor(() => expect(getPrInfo).toHaveBeenCalledTimes(2), { timeout: 1000 });
+        await vi.waitFor(() => expect(wm.getStatus(handle)).toMatchObject({ state: "completed" }), {
+            timeout: 1000,
+        });
         const st = wm.getStatus(handle) as { state: string };
         // may be completed or timed_out already consumed? First read after webhook should be completed
         expect(st.state).toBe("completed");
@@ -64,19 +76,29 @@ describe("e2e http+bus+watch", () => {
 
     it("poll fallback completes pending watch when webhook never arrives", async () => {
         const bus = new EventBus();
-        const getPrHeadSha = vi.fn(async () => "poll-sha");
-        const getChecks = vi.fn(async () => [
-            { name: "ci", status: "in_progress", conclusion: null, sha: "poll-sha" },
-        ]);
+        const getPrInfo = vi.fn(async () => ({
+            sha: "poll-sha",
+            state: "open" as const,
+            merged: false,
+        }));
+        const getChecks = vi
+            .fn()
+            .mockResolvedValueOnce([
+                { name: "ci", status: "in_progress", conclusion: null, sha: "poll-sha" },
+            ])
+            .mockResolvedValue([
+                { name: "ci", status: "completed", conclusion: "success", sha: "poll-sha" },
+            ]);
         const wm = new WatchManager(
             bus,
             {
-                getPrHeadShaFn: getPrHeadSha as unknown as typeof getPrHeadSha,
+                getPrInfoFn: getPrInfo,
                 getChecksFn: getChecks as unknown as typeof getChecks,
             },
-            { defaultTimeoutMs: 5000 },
+            { defaultTimeoutMs: 5000, graceMs: 0, settleMs: 1 },
         );
         const handle = await wm.startWatch({ owner: "acme", repo: "demo", prNumber: 100 });
+        await vi.waitFor(() => expect(getChecks).toHaveBeenCalledTimes(1));
 
         const pollFetch = vi.fn(async (url: string) => {
             if (url.includes("check-runs"))
@@ -93,12 +115,17 @@ describe("e2e http+bus+watch", () => {
         });
         const poller = new FallbackPoller(wm, {
             fetchFn: pollFetch as unknown as typeof fetch,
+            getPrInfoFn: getPrInfo as unknown as typeof import("../src/github.js").getPrInfo,
             intervalMs: 1000,
             graceMs: 0,
         });
         await poller.pollOnce();
+        await vi.waitFor(() => expect(wm.getStatus(handle)).toMatchObject({ state: "completed" }), {
+            timeout: 1000,
+        });
         const st = wm.getStatus(handle) as { state: string };
         expect(st.state).toBe("completed");
+        expect(getChecks).toHaveBeenCalledTimes(2);
     });
 
     it("1MB+1 payload is rejected 413 and does not publish", async () => {

@@ -1,5 +1,6 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import type { EventBus, NormalizedEvent } from "./bus.js";
+import { normalizeFeedback, type FeedbackKind } from "./feedback.js";
 
 export const MAX_PAYLOAD_BYTES = 1_000_000;
 export const DEDUP_TTL_MS = 5 * 60 * 1000;
@@ -85,12 +86,71 @@ export function normalizePayload(eventType: string, payload: unknown): WebhookPa
                 return normalizePullRequest(p);
             case "status":
                 return normalizeStatus(p);
+            case "issue_comment":
+                return normalizeFeedbackEvent("issue_comment", p);
+            case "pull_request_review_comment":
+                return normalizeFeedbackEvent("review_comment", p);
+            case "pull_request_review":
+                return normalizeFeedbackEvent("review", p);
             default:
                 return { events: [], ignoredReason: `unsupported event type: ${eventType}` };
         }
     } catch (e: unknown) {
         return { events: [], ignoredReason: `parse error: ${(e as Error).message}` };
     }
+}
+
+function normalizeFeedbackEvent(
+    kind: FeedbackKind,
+    payload: Record<string, unknown>,
+): WebhookParseResult {
+    const action = payload.action;
+    const allowedActions: Record<FeedbackKind, readonly string[]> = {
+        issue_comment: ["created", "edited"],
+        review_comment: ["created", "edited"],
+        review: ["submitted", "edited"],
+    };
+    if (typeof action !== "string" || !allowedActions[kind].includes(action)) {
+        return { events: [], ignoredReason: `ignored ${kind} action` };
+    }
+
+    const repo = repoInfo(payload.repository);
+    const rawFeedback =
+        payload[
+            kind === "issue_comment" ? "comment" : kind === "review_comment" ? "comment" : "review"
+        ];
+    const issue = payload.issue as Record<string, unknown> | undefined;
+    const pullRequest = payload.pull_request as Record<string, unknown> | undefined;
+    const belongsToPullRequest = kind !== "issue_comment" || Boolean(issue?.pull_request);
+    const prNumber = kind === "issue_comment" ? issue?.number : pullRequest?.number;
+    if (
+        !repo ||
+        !belongsToPullRequest ||
+        typeof prNumber !== "number" ||
+        !Number.isSafeInteger(prNumber) ||
+        prNumber < 1
+    ) {
+        return { events: [], ignoredReason: `missing pull request or repository for ${kind}` };
+    }
+    const feedback = normalizeFeedback(kind, rawFeedback);
+    if (!feedback) return { events: [], ignoredReason: `invalid ${kind} payload` };
+
+    return {
+        events: [
+            {
+                owner: repo.owner,
+                repo: repo.repo,
+                sha: "",
+                type: "feedback",
+                status: action,
+                conclusion: null,
+                name: feedback.kind,
+                prNumber,
+                feedback,
+                raw: payload,
+            },
+        ],
+    };
 }
 
 function repoInfo(repo: unknown): { owner: string; repo: string } | null {
@@ -118,6 +178,8 @@ function normalizeCheckRun(p: Record<string, unknown>): WebhookParseResult {
         repo: repo.repo,
         sha,
         type: "check_run",
+        ...(typeof cr.id === "number" ? { id: `check_run:${cr.id}` } : {}),
+        ...(typeof cr.html_url === "string" ? { url: cr.html_url } : {}),
         status: (cr.status as string) ?? "unknown",
         conclusion: (cr.conclusion as string | null) ?? null,
         name: (cr.name as string) ?? "unknown",
@@ -177,7 +239,10 @@ function normalizePullRequest(p: Record<string, unknown>): WebhookParseResult {
         repo: repo.repo,
         sha,
         type: "pull_request",
-        status: (p.action as string) ?? "unknown",
+        status:
+            p.action === "closed" && pr.merged === true
+                ? "merged"
+                : ((p.action as string) ?? "unknown"),
         conclusion: null,
         name: `pr:${(pr.number as number | undefined) ?? "unknown"}`,
         raw: p,
@@ -200,6 +265,8 @@ function normalizeStatus(p: Record<string, unknown>): WebhookParseResult {
         repo: repo.repo,
         sha,
         type: "status",
+        ...(context ? { id: `status:${context}` } : {}),
+        ...(typeof p.target_url === "string" ? { url: p.target_url } : {}),
         status,
         conclusion: conclusion ?? null,
         name: context ?? "status",
@@ -253,11 +320,6 @@ export async function handleWebhookRequest(
         return { status: 413, body: "payload too large", events: [] };
     }
 
-    if (deliveryId && dedup?.isDuplicate(deliveryId)) {
-        // replay / retry from GitHub — ack but don't re-publish (Q26)
-        return { status: 200, body: "duplicate delivery ignored", events: [] };
-    }
-
     // Need repository info to look up per-repo secret — require parsing first without verification?
     // Instead we require parsing to get owner/repo, then lookup secret, then verify.
     // If we can't parse owner/repo, fall back to requiring any secret? For security we verify before publish,
@@ -279,6 +341,10 @@ export async function handleWebhookRequest(
         }
         if (!verifySignature(secret, rawBody, signature)) {
             return { status: 401, body: "invalid signature", events: [] };
+        }
+        // Only authenticated deliveries may occupy the dedup cache.
+        if (deliveryId && dedup?.isDuplicate(deliveryId)) {
+            return { status: 200, body: "duplicate delivery ignored", events: [] };
         }
         const parsed = normalizePayload(eventType, j);
         if (parsed.events.length === 0 && parsed.ignoredReason) {

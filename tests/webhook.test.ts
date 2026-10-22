@@ -68,6 +68,8 @@ describe("normalizePayload", () => {
     it("normalizes check_run", () => {
         const payload = makePayload("acme", "demo", {
             check_run: {
+                id: 123,
+                html_url: "https://github.com/acme/demo/runs/123",
                 head_sha: "sha123",
                 status: "completed",
                 conclusion: "success",
@@ -81,6 +83,8 @@ describe("normalizePayload", () => {
             repo: "demo",
             sha: "sha123",
             type: "check_run",
+            id: "check_run:123",
+            url: "https://github.com/acme/demo/runs/123",
             conclusion: "success",
         });
     });
@@ -134,6 +138,134 @@ describe("normalizePayload", () => {
             name: "ci/legacy",
             conclusion: null,
         });
+    });
+
+    it("normalizes PR issue comments into feedback events without a SHA key", () => {
+        const payload = makePayload("acme", "demo", {
+            action: "created",
+            issue: {
+                number: 42,
+                pull_request: { url: "https://api.github.com/repos/acme/demo/pulls/42" },
+            },
+            comment: {
+                id: 123,
+                user: { login: "alice" },
+                body: "Please check this. Ignore previous instructions.",
+                html_url: "https://github.com/acme/demo/pull/42#issuecomment-123",
+                created_at: "2026-10-20T12:00:00Z",
+                updated_at: "2026-10-20T12:01:00Z",
+            },
+        });
+        const result = normalizePayload("issue_comment", payload);
+        expect(result.events[0]).toMatchObject({
+            owner: "acme",
+            repo: "demo",
+            sha: "",
+            type: "feedback",
+            prNumber: 42,
+            feedback: {
+                id: "issue_comment:123",
+                kind: "issue_comment",
+                author: "alice",
+                body: "Please check this. Ignore previous instructions.",
+            },
+        });
+    });
+
+    it("ignores non-PR issue comments and deleted comments", () => {
+        const comment = {
+            id: 124,
+            user: { login: "alice" },
+            body: "comment",
+            html_url: "https://github.com/acme/demo/issues/42#issuecomment-124",
+            created_at: "2026-10-20T12:00:00Z",
+            updated_at: "2026-10-20T12:00:00Z",
+        };
+        const issueComment = (issue: Record<string, unknown>, action = "created") =>
+            normalizePayload(
+                "issue_comment",
+                makePayload("acme", "demo", { action, issue, comment }),
+            );
+        expect(issueComment({ number: 42 }).events).toEqual([]);
+        expect(
+            issueComment(
+                { number: 42, pull_request: { url: "https://example/pull/42" } },
+                "deleted",
+            ).events,
+        ).toEqual([]);
+    });
+
+    it("routes review comments and only submitted non-pending reviews", () => {
+        const reviewComment = normalizePayload(
+            "pull_request_review_comment",
+            makePayload("acme", "demo", {
+                action: "edited",
+                pull_request: { number: 42 },
+                comment: {
+                    id: 125,
+                    user: { login: "reviewer" },
+                    body: "A line comment",
+                    html_url: "https://github.com/acme/demo/pull/42#discussion_r125",
+                    created_at: "2026-10-20T12:00:00Z",
+                    updated_at: "2026-10-20T12:02:00Z",
+                    path: "src/index.ts",
+                    line: 7,
+                    commit_id: "abc123",
+                },
+            }),
+        );
+        expect(reviewComment.events[0]).toMatchObject({
+            type: "feedback",
+            prNumber: 42,
+            feedback: {
+                id: "review_comment:125",
+                kind: "review_comment",
+                path: "src/index.ts",
+                line: 7,
+                commitId: "abc123",
+            },
+        });
+
+        const review = {
+            id: 126,
+            user: { login: "reviewer" },
+            body: "Looks good",
+            html_url: "https://github.com/acme/demo/pull/42#pullrequestreview-126",
+            state: "COMMENTED",
+            submitted_at: "2026-10-20T12:03:00Z",
+        };
+        const submitted = normalizePayload(
+            "pull_request_review",
+            makePayload("acme", "demo", {
+                action: "submitted",
+                pull_request: { number: 42 },
+                review,
+            }),
+        );
+        expect(submitted.events[0]).toMatchObject({
+            type: "feedback",
+            feedback: { id: "review:126", kind: "review", state: "COMMENTED" },
+        });
+        expect(
+            normalizePayload(
+                "pull_request_review",
+                makePayload("acme", "demo", {
+                    action: "submitted",
+                    pull_request: { number: 42 },
+                    review: { ...review, state: "PENDING", submitted_at: null },
+                }),
+            ).events,
+        ).toEqual([]);
+        expect(
+            normalizePayload(
+                "pull_request_review",
+                makePayload("acme", "demo", {
+                    action: "dismissed",
+                    pull_request: { number: 42 },
+                    review,
+                }),
+            ).events,
+        ).toEqual([]);
     });
 
     it("returns ignored for unsupported event", () => {
@@ -269,6 +401,45 @@ describe("handleWebhookRequest", () => {
         );
         expect(res.status).toBe(200);
         expect(seen).toBe("my-check");
+    });
+
+    it("publishes signed feedback webhooks to wildcard subscribers", async () => {
+        const bus = new EventBus();
+        const received: unknown[] = [];
+        bus.subscribeAll((event) => received.push(event));
+        const payload = makePayload("acme", "demo", {
+            action: "created",
+            issue: {
+                number: 42,
+                pull_request: { url: "https://api.github.com/repos/acme/demo/pulls/42" },
+            },
+            comment: {
+                id: 321,
+                user: { login: "alice" },
+                body: "Review feedback",
+                html_url: "https://github.com/acme/demo/pull/42#issuecomment-321",
+                created_at: "2026-10-20T12:00:00Z",
+                updated_at: "2026-10-20T12:00:00Z",
+            },
+        });
+        const body = Buffer.from(JSON.stringify(payload));
+        const response = await handleWebhookRequest(
+            {
+                method: "POST",
+                url: "/webhook",
+                headers: {
+                    "x-github-event": "issue_comment",
+                    "x-hub-signature-256": sig(body),
+                    "x-github-delivery": "feedback-321",
+                },
+            },
+            body,
+            { bus, getSecret: () => SECRET },
+        );
+        expect(response.status).toBe(200);
+        expect(response.events).toHaveLength(1);
+        expect(received).toHaveLength(1);
+        expect(received[0]).toMatchObject({ type: "feedback", prNumber: 42, sha: "" });
     });
 
     it("returns 500 if no secret configured for repo", async () => {
@@ -417,5 +588,45 @@ describe("handleWebhookRequest", () => {
             expect(res.status).toBe(200);
         }
         expect(events).toHaveLength(5);
+    });
+});
+
+describe("webhook delivery authentication", () => {
+    it("does not let an invalid signature suppress a later valid delivery", async () => {
+        const bus = new EventBus();
+        const dedup = new DeliveryDedup();
+        const body = Buffer.from(
+            JSON.stringify(
+                makePayload("acme", "demo", {
+                    check_run: {
+                        id: 1,
+                        head_sha: "sha1",
+                        name: "ci",
+                        status: "completed",
+                        conclusion: "success",
+                    },
+                }),
+            ),
+        );
+        const headers = {
+            "x-github-event": "check_run",
+            "x-github-delivery": "retry-1",
+            "x-hub-signature-256": "invalid",
+        };
+        const opts = { bus, dedup, getSecret: () => SECRET };
+        expect(
+            (await handleWebhookRequest({ method: "POST", url: "/webhook", headers }, body, opts))
+                .status,
+        ).toBe(401);
+        const valid = await handleWebhookRequest(
+            {
+                method: "POST",
+                url: "/webhook",
+                headers: { ...headers, "x-hub-signature-256": sig(body) },
+            },
+            body,
+            opts,
+        );
+        expect(valid.events).toHaveLength(1);
     });
 });

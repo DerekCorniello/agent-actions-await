@@ -8,11 +8,6 @@ import { platform, arch } from "node:os";
 
 // Pinned version per Q41 — update via PR when new cloudflared stable
 export const CLOUDFLARED_VERSION = "2024.11.1";
-// Minimal checksum map for testability; production fills via postinstall fetch of release hashes
-export const EXPECTED_SHA256: Record<string, string> = {
-    // populated at build time by scripts/postinstall.js; empty here is okay for tests with injected expected
-};
-
 export type TunnelDeps = {
     execPathExists?: (path: string) => boolean | Promise<boolean>;
     spawnFn?: typeof spawn;

@@ -21,7 +21,7 @@ describe("TunnelManager", () => {
         } as unknown as import("../src/tunnel.js").Tunnel;
         const ensureBin = vi.fn(async () => "/tmp/cloudflared");
         const start = vi.fn(async () => fakeTunnel);
-        const repatch = vi.fn(async () => {});
+        const repatch = vi.fn(async () => undefined);
         const onUrl = vi.fn();
         const mgr = new TunnelManager({
             port: 4000,
@@ -89,6 +89,50 @@ describe("TunnelManager", () => {
             create,
         });
         expect(create).toHaveBeenCalledWith("acme", "demo", "https://new.trycloudflare.com");
+    });
+
+    it("returns the replacement hook ID after recreating a deleted hook", async () => {
+        const patch = vi.fn(async () => {
+            throw new Error("404 not found");
+        });
+        const create = vi.fn(async () => 99);
+        const id = await repatchWebhookWithRetry(
+            "acme",
+            "demo",
+            1,
+            "https://new.trycloudflare.com",
+            {
+                patch,
+                create,
+            },
+        );
+        expect(id).toBe(99);
+    });
+
+    it("updates its in-memory hook ID after a recreation", async () => {
+        const hooks = [{ owner: "acme", repo: "demo", hookId: 1 }];
+        const fakeProc = {
+            once: vi.fn(),
+            on: vi.fn(),
+            kill: vi.fn(),
+        } as unknown as import("node:child_process").ChildProcess;
+        const fakeTunnel = {
+            url: "https://xyz.trycloudflare.com",
+            proc: fakeProc,
+            stop: vi.fn(),
+        } as unknown as import("../src/tunnel.js").Tunnel;
+        const mgr = new TunnelManager({
+            port: 4000,
+            binPath: "/tmp/cloudflared",
+            hooks,
+            start: vi.fn(
+                async () => fakeTunnel,
+            ) as unknown as typeof import("../src/tunnel.js").startTunnel,
+            repatch: vi.fn(async () => 99),
+        });
+        await mgr.start();
+        expect(hooks[0]!.hookId).toBe(99);
+        mgr.stop();
     });
 
     it("repatch retries on transient and then succeeds", async () => {

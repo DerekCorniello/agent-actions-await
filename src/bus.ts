@@ -1,4 +1,5 @@
 import { EventEmitter } from "node:events";
+import type { FeedbackItem } from "./feedback.js";
 
 /**
  * Normalized event published onto the bus.
@@ -8,10 +9,15 @@ export type NormalizedEvent = {
     owner: string;
     repo: string;
     sha: string;
-    type: "check_run" | "check_suite" | "workflow_run" | "pull_request" | "status";
+    type: "check_run" | "check_suite" | "workflow_run" | "pull_request" | "status" | "feedback";
     status: string;
     conclusion: string | null;
     name: string;
+    id?: string;
+    url?: string;
+    runId?: number;
+    prNumber?: number;
+    feedback?: FeedbackItem;
     raw?: unknown;
 };
 

@@ -1,5 +1,6 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { createHmac } from "node:crypto";
+import { request } from "node:http";
 import { EventBus } from "../src/bus.js";
 import { createHttpServer } from "../src/http-server.js";
 
@@ -80,6 +81,29 @@ describe("http-server", () => {
             body,
         });
         expect(res.status).toBe(401);
+        server.close();
+    });
+
+    it("rejects an oversized streamed body without passing it to webhook processing", async () => {
+        const bus = new EventBus();
+        const getSecret = vi.fn(() => SECRET);
+        const { server, url } = await createHttpServer({
+            bus,
+            getSecret,
+            port: 0,
+            maxBytes: 8,
+        });
+        const status = await new Promise<number>((resolve, reject) => {
+            const req = request(`${url}/webhook`, { method: "POST" }, (res) => {
+                res.resume();
+                resolve(res.statusCode ?? 0);
+            });
+            req.once("error", reject);
+            for (let i = 0; i < 64; i++) req.write(Buffer.alloc(256));
+            req.end();
+        });
+        expect(status).toBe(413);
+        expect(getSecret).not.toHaveBeenCalled();
         server.close();
     });
 

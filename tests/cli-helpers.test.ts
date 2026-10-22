@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { usageText, buildHookPayload } from "../src/cli-helpers.js";
+import { usageText, buildHookPayload, GITHUB_WEBHOOK_EVENTS } from "../src/cli-helpers.js";
 
 describe("cli-helpers", () => {
     it("usageText contains harness add", () => {
@@ -9,7 +9,7 @@ describe("cli-helpers", () => {
         expect(t).toMatch(/--help/);
     });
 
-    it("buildHookPayload is valid JSON with 5 events and secret", () => {
+    it("buildHookPayload is valid JSON with all CI and feedback events", () => {
         const p = JSON.parse(buildHookPayload("https://x.trycloudflare.com/webhook", "sec123")) as {
             config: { url: string; secret: string };
             events: string[];
@@ -22,6 +22,10 @@ describe("cli-helpers", () => {
             "workflow_run",
             "pull_request",
             "status",
+            "issue_comment",
+            "pull_request_review_comment",
+            "pull_request_review",
         ]);
+        expect(p.events).toEqual([...GITHUB_WEBHOOK_EVENTS]);
     });
 });
