@@ -6,18 +6,13 @@ It follows new commits on the PR, supports exact check-name filters, and returns
 
 ## Install
 
-Use Node.js 20 or newer. For a local checkout, build the server first:
+Use Node.js 20 or newer. Configure your MCP client to run the package through `npx`:
 
 ```sh
-git clone https://github.com/DerekCorniello/agent-actions-await.git
-cd agent-actions-await
-npm install
-npm run build
+npx --yes agent-actions-await --polling-only
 ```
 
-The package is not published to npm yet. Install from this checkout for now.
-
-In the client examples below, replace `/path/to/agent-actions-await` with the checkout's absolute path. Add the MCP server with the command `node` and arguments `/path/to/agent-actions-await/dist/bin/cli.js --polling-only`. The examples use polling, so they don't need webhook permissions or a tunnel.
+The examples below use polling, so they don't need webhook permissions or a tunnel. To run from a local checkout instead, build it with `npm install` and `npm run build`, then use `node /path/to/agent-actions-await/dist/bin/cli.js --polling-only`.
 
 Authenticate with `gh auth login`, or make `GH_TOKEN`, `GITHUB_TOKEN`, or `GITHUB_PAT` available to the MCP server process through the client's environment settings.
 
@@ -26,7 +21,7 @@ Authenticate with `gh auth login`, or make `GH_TOKEN`, `GITHUB_TOKEN`, or `GITHU
 Add it from a terminal:
 
 ```sh
-codex mcp add agent-actions-await -- node /path/to/agent-actions-await/dist/bin/cli.js --polling-only
+codex mcp add agent-actions-await -- npx --yes agent-actions-await --polling-only
 codex mcp list
 ```
 
@@ -35,7 +30,7 @@ Codex CLI, its IDE extension, and ChatGPT desktop share MCP settings. In ChatGPT
 ### Claude Code
 
 ```sh
-claude mcp add --transport stdio --scope user agent-actions-await -- node /path/to/agent-actions-await/dist/bin/cli.js --polling-only
+claude mcp add --transport stdio --scope user agent-actions-await -- npx --yes agent-actions-await --polling-only
 claude mcp list
 ```
 
@@ -49,8 +44,8 @@ Add this entry to `.cursor/mcp.json` in a project, or `~/.cursor/mcp.json` for y
 {
     "mcpServers": {
         "agent-actions-await": {
-            "command": "node",
-            "args": ["/path/to/agent-actions-await/dist/bin/cli.js", "--polling-only"]
+            "command": "npx",
+            "args": ["--yes", "agent-actions-await", "--polling-only"]
         }
     }
 }
@@ -67,8 +62,8 @@ Run **MCP: Add Server** from the Command Palette and choose **Command (stdio)**,
     "servers": {
         "agent-actions-await": {
             "type": "stdio",
-            "command": "node",
-            "args": ["/path/to/agent-actions-await/dist/bin/cli.js", "--polling-only"]
+            "command": "npx",
+            "args": ["--yes", "agent-actions-await", "--polling-only"]
         }
     }
 }
@@ -84,8 +79,8 @@ Add the server to `~/.gemini/settings.json` under `mcpServers`:
 {
     "mcpServers": {
         "agent-actions-await": {
-            "command": "node",
-            "args": ["/path/to/agent-actions-await/dist/bin/cli.js", "--polling-only"]
+            "command": "npx",
+            "args": ["--yes", "agent-actions-await", "--polling-only"]
         }
     }
 }

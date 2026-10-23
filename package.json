@@ -22,7 +22,8 @@
         "agent-actions-await": "./dist/bin/cli.js"
     },
     "files": [
-        "dist"
+        "dist/bin",
+        "dist/src"
     ],
     "scripts": {
         "build": "tsc -p tsconfig.json",

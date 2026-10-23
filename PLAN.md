@@ -21,13 +21,10 @@
 
 ## Current limits
 
-- The package is not published to npm yet. Follow the source-checkout instructions in the README; do not use `npx agent-actions-await` until a package release exists.
 - MCP uses stdio only. The separate local HTTP server receives signed GitHub webhooks; it is not an HTTP MCP endpoint.
 - An exact check filter can wait until the deadline if a requested check never appears. The server cannot predict workflows that GitHub has not created yet.
 - `completed` means the watch ended, not that checks passed or the PR is ready to merge. Agents must inspect the result and evaluate feedback against the user's request.
 
-## Before a public release
+## Release
 
-1. Publish the package to npm, then verify install and upgrade instructions from a clean client setup.
-2. Decide whether to add a separate release workflow. The current CI workflow only validates code.
-3. Keep the README client examples and supported transports aligned with what is actually tested.
+The `Publish to npm` workflow validates the release and publishes when a `v*` tag matches the package version. The first version must be published by an npm-authenticated maintainer. Configure GitHub Actions as a trusted publisher on npm after that first publish.

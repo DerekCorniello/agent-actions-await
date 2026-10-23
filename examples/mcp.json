@@ -1,9 +1,10 @@
 {
     "mcpServers": {
         "agent-actions-await": {
-            "command": "node",
+            "command": "npx",
             "args": [
-                "/absolute/path/to/agent-actions-await/dist/bin/cli.js",
+                "--yes",
+                "agent-actions-await",
                 "--polling-only"
             ],
             "env": {}
