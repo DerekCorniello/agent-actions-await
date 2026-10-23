@@ -19,7 +19,7 @@
         "node": ">=20"
     },
     "bin": {
-        "agent-actions-await": "./dist/bin/cli.js"
+        "agent-actions-await": "dist/bin/cli.js"
     },
     "files": [
         "dist/bin",
