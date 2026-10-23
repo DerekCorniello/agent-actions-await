@@ -12,6 +12,8 @@ The server auto-creates config from git remote on first run.
 
 Options:
   --polling-only  Start without webhook setup or a tunnel
+  --poll-interval-seconds N  Override fallback poll interval (1-3600)
+  --poll-grace-seconds N  Override fallback startup delay (0-3600)
   doctor         Report GitHub auth availability and configured webhook mode
   --help  Show this help
 `;

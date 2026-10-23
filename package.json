@@ -22,7 +22,8 @@
         "lint:fix": "eslint . --fix",
         "format": "prettier --write \"src/**/*.{ts,js}\" \"bin/**/*.{ts,js}\" \"tests/**/*.{ts,js}\"",
         "format:check": "prettier --check \"src/**/*.{ts,js}\" \"bin/**/*.{ts,js}\" \"tests/**/*.{ts,js}\"",
-        "prepack": "npm run build"
+        "prepack": "npm run build",
+        "fake:github": "npm run build && node dist/bin/fake-github.js"
     },
     "keywords": [
         "github",

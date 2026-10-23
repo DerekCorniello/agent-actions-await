@@ -17,6 +17,7 @@ import { ensureCloudflared } from "../src/tunnel.js";
 import { TunnelManager, repatchWebhookWithRetry } from "../src/tunnel-manager.js";
 import { buildHookPayload, usageText } from "../src/cli-helpers.js";
 import { getGitRemoteOwnerRepo } from "../src/git.js";
+import { parseCliArgs } from "../src/cli-args.js";
 
 function usage(): never {
     process.stdout.write(usageText());
@@ -160,7 +161,11 @@ async function bootstrapTunnel(
     }
 }
 
-async function cmdStart(pollingOnly: boolean): Promise<void> {
+async function cmdStart(opts: {
+    pollingOnly: boolean;
+    pollIntervalSeconds?: number;
+    pollGraceSeconds?: number;
+}): Promise<void> {
     const cfg = await loadConfig();
     const bus = new EventBus();
     const wm = new WatchManager(bus);
@@ -175,8 +180,8 @@ async function cmdStart(pollingOnly: boolean): Promise<void> {
         host: "127.0.0.1",
     });
     const poller = new FallbackPoller(wm, {
-        intervalMs: (cfg.pollIntervalSeconds ?? 15) * 1000,
-        graceMs: (cfg.pollGraceSeconds ?? 30) * 1000,
+        intervalMs: (opts.pollIntervalSeconds ?? cfg.pollIntervalSeconds ?? 15) * 1000,
+        graceMs: (opts.pollGraceSeconds ?? cfg.pollGraceSeconds ?? 30) * 1000,
     });
     poller.start();
 
@@ -215,7 +220,7 @@ async function cmdStart(pollingOnly: boolean): Promise<void> {
         mcp.onclose = shutdown;
         process.stdin.once("end", shutdown);
         if (process.stdin.readableEnded) shutdown();
-        if (!pollingOnly)
+        if (!opts.pollingOnly)
             void bootstrapTunnel(port, url, shutdownRequested, registerTunnel).catch(
                 (error: unknown) => {
                     process.stderr.write(
@@ -227,12 +232,10 @@ async function cmdStart(pollingOnly: boolean): Promise<void> {
 }
 
 async function main(): Promise<void> {
-    const args = process.argv.slice(2);
-    if (args.includes("--help") || args.includes("-h")) usage();
-    if (args.includes("doctor")) return cmdDoctor();
-    const unknown = args.filter((arg) => arg !== "--polling-only");
-    if (unknown.length) throw new Error(`unknown argument: ${unknown[0]}`);
-    await cmdStart(args.includes("--polling-only"));
+    const args = parseCliArgs(process.argv.slice(2));
+    if (args.command === "help") usage();
+    if (args.command === "doctor") return cmdDoctor();
+    await cmdStart(args);
 }
 
 main().catch((error: unknown) => {

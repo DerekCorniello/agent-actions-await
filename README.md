@@ -18,12 +18,12 @@ Other MCP clients can use:
 
 ```json
 {
-  "mcpServers": {
-    "agent-actions-await": {
-      "command": "npx",
-      "args": ["-y", "agent-actions-await", "--polling-only"]
+    "mcpServers": {
+        "agent-actions-await": {
+            "command": "npx",
+            "args": ["-y", "agent-actions-await", "--polling-only"]
+        }
     }
-  }
 }
 ```
 
@@ -47,12 +47,12 @@ Example:
 
 ```json
 {
-  "pr_url": "https://github.com/acme/demo/pull/42",
-  "mode": "both",
-  "filter": ["lint", "test"],
-  "feedback_authors": ["review-bot[bot]"],
-  "feedback_quiet_seconds": 2,
-  "timeout_seconds": 600
+    "pr_url": "https://github.com/acme/demo/pull/42",
+    "mode": "both",
+    "filter": ["lint", "test"],
+    "feedback_authors": ["review-bot[bot]"],
+    "feedback_quiet_seconds": 2,
+    "timeout_seconds": 600
 }
 ```
 
@@ -60,11 +60,11 @@ Pass that to `await_pr_actions`. If it returns `pending`, call `wait_pr_watch` w
 
 ## Watch modes
 
-| `mode` | Completes when |
-| --- | --- |
-| `checks` (default) | All selected CI checks have appeared and settled. |
-| `feedback` | New matching feedback has arrived and its quiet period has elapsed. |
-| `both` | Either CI settles or new matching feedback arrives and its quiet period elapses, whichever happens first. |
+| `mode`             | Completes when                                                                                            |
+| ------------------ | --------------------------------------------------------------------------------------------------------- |
+| `checks` (default) | All selected CI checks have appeared and settled.                                                         |
+| `feedback`         | New matching feedback has arrived and its quiet period has elapsed.                                       |
+| `both`             | Either CI settles or new matching feedback arrives and its quiet period elapses, whichever happens first. |
 
 `both` resumes on the first ready event. CI can finish with no new comments, or feedback can arrive while CI is still running. The result shows `completionReason`, `checksState`, and `feedbackState` so the agent can see what is ready and what remains pending. A failed CI run counts as settled and returns its failures. Each watch returns one batch and then stops; start another watch for the remaining condition when needed. Closing or merging the PR ends any mode immediately with a distinct completion reason.
 
@@ -78,13 +78,13 @@ Results include feedback author, body, URL, type, timestamps, and available file
 
 ## Tools
 
-| Tool | Behavior |
-| --- | --- |
-| `await_pr_actions` | Start a watch and wait for a bounded window. Returns status and a reusable handle. |
-| `start_pr_watch` | Return a handle immediately, while GitHub discovery runs in the background. |
-| `wait_pr_watch` | Wait on an existing handle. A call timeout or cancellation does not cancel the underlying watch. |
-| `get_pr_watch_status` | Read status immediately. Final results can be read repeatedly during retention. |
-| `cancel_pr_watch` | Cancel the watch and release its subscriptions and timers. |
+| Tool                  | Behavior                                                                                         |
+| --------------------- | ------------------------------------------------------------------------------------------------ |
+| `await_pr_actions`    | Start a watch and wait for a bounded window. Returns status and a reusable handle.               |
+| `start_pr_watch`      | Return a handle immediately, while GitHub discovery runs in the background.                      |
+| `wait_pr_watch`       | Wait on an existing handle. A call timeout or cancellation does not cancel the underlying watch. |
+| `get_pr_watch_status` | Read status immediately. Final results can be read repeatedly during retention.                  |
+| `cancel_pr_watch`     | Cancel the watch and release its subscriptions and timers.                                       |
 
 Start tools accept either `pr_url` or `owner`, `repo`, and `pr_number`. Filters are `all` or exact check names. Every requested name must appear and settle before a named-filter watch completes.
 
@@ -107,6 +107,36 @@ Configuration is stored in `~/.config/agent-actions-await/config.json`; signing 
 The local HTTP listener serves `/health` and `/webhook`. MCP is stdio only. The quick tunnel forwards to that HTTP listener; it does not carry MCP traffic. There is no named-tunnel CLI option.
 
 For GitHub Enterprise, configure `GH_HOST` or `GITHUB_API_URL` and authenticate for that host. PR URLs must match the configured GitHub host.
+
+## Fake GitHub for local demos
+
+You can run a small local API that pretends to be GitHub. It starts PR #42 at `acme/demo` with `lint` and `test` checks in progress. It makes no requests to GitHub and needs no account or repository.
+
+In a terminal, start the fake API from this checkout:
+
+```sh
+npm run fake:github
+```
+
+Keep that process running. Add the MCP server from [mcp.fake-github.json](examples/mcp.fake-github.json) to your client configuration. Replace `/absolute/path/to/agent-actions-await` with this checkout's path, then restart the client. The example polls every second and uses a fake token accepted only by this local simulator. If port 4173 is busy, start the fake API with `npm run fake:github -- --port 4199` and change `GITHUB_API_URL` in the config to port 4199.
+
+Start a watch in the agent using `owner: "acme"`, `repo: "demo"`, `pr_number: 42`. Choose `checks`, `feedback`, or `both`. While the tool is waiting, use a second terminal to trigger an event. For example:
+
+```sh
+curl -fsS -X POST http://127.0.0.1:4173/__fake/scenario \
+  -H 'content-type: application/json' \
+  -d '{"action":"fail"}'
+```
+
+Available actions are `pass`, `fail`, `push`, `comment`, `review`, `close`, `reopen`, and `reset`. `review` adds a submitted review and an inline comment. `push` moves the PR to a new SHA and starts both checks again. Reset between runs to restore the initial pending state:
+
+```sh
+curl -fsS -X POST http://127.0.0.1:4173/__fake/scenario \
+  -H 'content-type: application/json' \
+  -d '{"action":"reset"}'
+```
+
+`both` resumes on whichever arrives first. Trigger `pass` or `fail` to finish by CI; trigger `comment` or `review` to finish by feedback. The fake service also exposes `GET /__fake/state` so you can inspect its current SHA and check state.
 
 ## Development
 

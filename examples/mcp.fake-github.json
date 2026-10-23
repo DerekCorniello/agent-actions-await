@@ -1,0 +1,19 @@
+{
+    "mcpServers": {
+        "agent-actions-await-fake": {
+            "command": "node",
+            "args": [
+                "/absolute/path/to/agent-actions-await/dist/bin/cli.js",
+                "--polling-only",
+                "--poll-interval-seconds",
+                "1",
+                "--poll-grace-seconds",
+                "0"
+            ],
+            "env": {
+                "GITHUB_API_URL": "http://127.0.0.1:4173",
+                "GITHUB_TOKEN": "fake-github-token"
+            }
+        }
+    }
+}
