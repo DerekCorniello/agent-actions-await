@@ -221,3 +221,5 @@ Tests mock GitHub responses and tunnel downloads. HTTP integration tests bind a 
 ## License
 
 GPL-3.0. See `LICENSE`.
+
+<!-- CI smoke test only. Do not merge. -->
