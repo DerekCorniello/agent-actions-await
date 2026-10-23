@@ -4,6 +4,17 @@
     "description": "Wait for GitHub PR checks and review feedback through MCP, with polling and optional webhooks",
     "type": "module",
     "license": "GPL-3.0-only",
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/DerekCorniello/agent-actions-await.git"
+    },
+    "homepage": "https://github.com/DerekCorniello/agent-actions-await#readme",
+    "bugs": {
+        "url": "https://github.com/DerekCorniello/agent-actions-await/issues"
+    },
+    "publishConfig": {
+        "access": "public"
+    },
     "engines": {
         "node": ">=20"
     },

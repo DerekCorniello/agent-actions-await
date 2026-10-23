@@ -47,3 +47,6 @@ jobs:
 
       - name: Check formatting
         run: npm run format:check
+
+      - name: Check package contents
+        run: npm pack --dry-run
