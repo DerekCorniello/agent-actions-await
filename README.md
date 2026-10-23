@@ -15,6 +15,8 @@ npm install
 npm run build
 ```
 
+The package is not published to npm yet. Install from this checkout for now.
+
 In the client examples below, replace `/path/to/agent-actions-await` with the checkout's absolute path. Add the MCP server with the command `node` and arguments `/path/to/agent-actions-await/dist/bin/cli.js --polling-only`. The examples use polling, so they don't need webhook permissions or a tunnel.
 
 Authenticate with `gh auth login`, or make `GH_TOKEN`, `GITHUB_TOKEN`, or `GITHUB_PAT` available to the MCP server process through the client's environment settings.
@@ -93,11 +95,9 @@ Keep any existing settings in the file. Restart Gemini CLI and check `/mcp list`
 
 For other clients, including Windsurf, Cline, Roo Code, and Zed, use their stdio MCP setup with the same `node` command and arguments. This server uses stdio for MCP; its separate HTTP listener receives GitHub webhooks. A client that only accepts a remote HTTP MCP endpoint cannot connect to this server directly.
 
-If you installed the published npm package instead of using a checkout, use `npx` as the command and `-y`, `agent-actions-await`, and `--polling-only` as its arguments.
-
 After adding the server, restart or reconnect the client. Startup diagnostics go to stderr, leaving stdout available for MCP messages.
 
-Run `npx -y agent-actions-await doctor` to check available authentication and configured webhook coverage. The command does not create hooks or print credentials. It reports configuration, not proof of live webhook delivery.
+Run `node /path/to/agent-actions-await/dist/bin/cli.js doctor` to check available authentication and configured webhook coverage. The command does not create hooks or print credentials. It reports configuration, not proof of live webhook delivery.
 
 ## Waiting and continuing work
 
